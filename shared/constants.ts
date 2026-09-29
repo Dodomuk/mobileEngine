@@ -4,24 +4,31 @@ import type { CharacterKey, Choice } from './types.ts';
 export const FIELD_WIDTH = 768;
 export const FIELD_HEIGHT = 1280;
 export const TILE_SIZE = 64;
+// 캐릭터가 화면 밖으로 반쯤 나가지 않도록 목표 지점을 경계에서 이만큼 안쪽으로 자른다
+export const FIELD_MARGIN = 32;
 
 // 5장: 시작 위치는 하단 대기 영역(y 1050~1200)
 export const SPAWN_AREA = { minX: 64, maxX: FIELD_WIDTH - 64, minY: 1050, maxY: 1200 };
 
 export const ANSWER_CIRCLES: Record<Choice, { x: number; y: number; r: number; color: string }> = {
-  A: { x: 192, y: 440, r: 150, color: 'rgba(231, 76, 60, 0.35)' },
-  B: { x: 576, y: 440, r: 150, color: 'rgba(52, 120, 219, 0.35)' },
-  C: { x: 384, y: 820, r: 150, color: 'rgba(46, 174, 96, 0.35)' },
+  A: { x: 192, y: 440, r: 150, color: 'rgba(235, 64, 52, 0.55)' },
+  B: { x: 576, y: 440, r: 150, color: 'rgba(40, 110, 230, 0.55)' },
+  C: { x: 384, y: 820, r: 150, color: 'rgba(20, 150, 70, 0.55)' },
 };
 
 export const MOVE_SPEED = 320; // 논리 단위/초
 export const TICK_HZ = 10;
+export const TICK_MS = 1000 / TICK_HZ;
 
 // 1장: 플레이어 최대 15명(관리자 미포함)
 export const MAX_PLAYERS = 15;
 
 export const NICKNAME_MIN = 1;
 export const NICKNAME_MAX = 8;
+
+// 1장·6장: 연습 3문제가 맨 앞, 이어서 본 게임 20문제
+export const PRACTICE_COUNT = 3;
+export const MAIN_COUNT = 20;
 
 export const DEFAULT_TIME_LIMIT_SEC = 120;
 export const SCORE_CORRECT = 10;
@@ -37,9 +44,19 @@ export const CHARACTERS: { key: CharacterKey; name: string; color: string }[] = 
 
 // 4장: 관리자 고정 캐릭터·닉네임. 플레이어는 선택·사용 불가
 export const ADMIN_CHARACTER = 'admin' as const;
+export const ADMIN_ID = 'admin'; // 위치 브로드캐스트에서 관리자를 가리키는 id (플레이어 id는 UUID)
 export const ADMIN_NICKNAME = '관리자';
 export const ADMIN_COLOR = '#d4a017';
 
 export function characterImageUrl(key: CharacterKey | typeof ADMIN_CHARACTER): string {
   return `/assets/characters/${key}.png`;
+}
+
+// 5장 답 판정: 캐릭터 중심과 원 중심의 거리가 반지름 이하인 원. 원끼리 겹치지 않으므로 최대 1개.
+export function circleAt(x: number, y: number): Choice | null {
+  for (const choice of ['A', 'B', 'C'] as const) {
+    const c = ANSWER_CIRCLES[choice];
+    if (Math.hypot(x - c.x, y - c.y) <= c.r) return choice;
+  }
+  return null;
 }

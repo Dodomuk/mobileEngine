@@ -17,6 +17,9 @@ export interface Player {
 export type PublicPlayer = Pick<Player,
   'id' | 'nickname' | 'character' | 'x' | 'y' | 'score' | 'correctCount' | 'connected'>;
 
+export interface PlayerPosition { id: string; x: number; y: number }
+export interface MovePayload { x: number; y: number }
+
 export interface Question {
   id: string; stage: Stage; topic: string;
   text: string;                 // 관리자 전용
@@ -48,13 +51,36 @@ export interface Room {
   actions: Record<string, RoundAction>; history: RoundResult[];  // 본 게임 시작 때 비움
 }
 
+// 관리자 고정 캐릭터(4장). 점수·순위·찍기 대상에서 빠지므로 플레이어와 따로 둔다.
+export interface AdminAvatar {
+  x: number; y: number; targetX: number; targetY: number; connected: boolean;
+}
+export type PublicAdmin = Pick<AdminAvatar, 'x' | 'y' | 'connected'>;
+
+// round:reveal 페이로드: RoundResult + 갱신된 점수
+export interface RevealPayload extends RoundResult {
+  scores: Record<string, { score: number; correctCount: number }>;
+}
+
+export interface RankingEntry {
+  rank: number; id: string; nickname: string; character: CharacterKey;
+  score: number; correctCount: number;
+}
+
+export interface AnswerTally { A: number; B: number; C: number; none: number }
+
 export interface StateSnapshot {
   phase: Phase;
   stage: Stage;
   players: PublicPlayer[];
   maxPlayers: number;
+  admin: PublicAdmin | null;
   question: PublicQuestion | null;
-  deadline: number | null;
+  questionStartedAt: number | null; // epoch ms, 타이머 바 전체 길이 계산용
+  deadline: number | null;          // epoch ms
+  serverNow: number;                // 기기 시계 차이 보정용
+  lastRound: RevealPayload | null;  // REVEAL 단계에서만
+  ranking: RankingEntry[] | null;   // RESULT 단계에서만
 }
 
 export type ErrorCode =
@@ -63,7 +89,11 @@ export type ErrorCode =
   | 'INVALID_CHARACTER'
   | 'NICKNAME_TAKEN'
   | 'ROOM_FULL'
-  | 'SESSION_NOT_FOUND';
+  | 'SESSION_NOT_FOUND'
+  | 'NOT_ADMIN'
+  | 'INVALID_PIN'
+  | 'INVALID_PHASE'
+  | 'ADMIN_REPLACED';
 
 export interface ErrorPayload { code: ErrorCode; message: string }
 
@@ -72,4 +102,9 @@ export interface ResumePayload { sessionToken: string }
 
 export type JoinAck =
   | { ok: true; playerId: string; sessionToken: string }
+  | { ok: false; error: ErrorPayload };
+
+export interface AdminAuthPayload { pin?: string; token?: string }
+export type AdminAuthAck =
+  | { ok: true; token: string }
   | { ok: false; error: ErrorPayload };

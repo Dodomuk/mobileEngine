@@ -1,5 +1,7 @@
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { MAX_PLAYERS, SPAWN_AREA } from '../../shared/constants.ts';
+import { ADMIN_ID, ANSWER_CIRCLES, circleAt, FIELD_HEIGHT, FIELD_MARGIN, FIELD_WIDTH, MAX_PLAYERS, MOVE_SPEED, SPAWN_AREA } from '../../shared/constants.ts';
+import { loadQuestions } from './questions.ts';
 import { GameRoom } from './room.ts';
 
 function joinOk(room: GameRoom, nickname: string, character = 'slime') {
@@ -105,5 +107,240 @@ describe('GameRoom.snapshot', () => {
     const [publicPlayer] = room.snapshot().players;
     expect(publicPlayer).not.toHaveProperty('sessionToken');
     expect(publicPlayer).not.toHaveProperty('targetX');
+  });
+});
+
+describe('이동', () => {
+  function placed(room: GameRoom, x: number, y: number) {
+    const p = joinOk(room, '철수');
+    p.x = p.targetX = x;
+    p.y = p.targetY = y;
+    return p;
+  }
+
+  it('틱마다 초속 320으로 목표를 향해 직선 이동한다', () => {
+    const room = new GameRoom();
+    const p = placed(room, 100, 1000);
+    room.setTarget(p.id, 100 + 1000, 1000); // 경계로 잘림
+    expect(room.tick(0.1)).toBe(true);
+    expect(p.x).toBeCloseTo(100 + MOVE_SPEED * 0.1);
+    expect(p.y).toBe(1000);
+  });
+
+  it('대각선 이동도 속도가 같다', () => {
+    const room = new GameRoom();
+    const p = placed(room, 100, 1000);
+    room.setTarget(p.id, 400, 600);
+    room.tick(0.5);
+    expect(Math.hypot(p.x - 100, p.y - 1000)).toBeCloseTo(MOVE_SPEED * 0.5);
+  });
+
+  it('목표를 지나치지 않고 도착하면 멈춘다', () => {
+    const room = new GameRoom();
+    const p = placed(room, 100, 1000);
+    room.setTarget(p.id, 110, 1000);
+    room.tick(0.1);
+    expect(p.x).toBe(110);
+    expect(room.tick(0.1)).toBe(false);
+  });
+
+  it('이동 중 다시 터치하면 목표만 바뀐다', () => {
+    const room = new GameRoom();
+    const p = placed(room, 100, 1000);
+    room.setTarget(p.id, 700, 1000);
+    room.tick(0.1);
+    const x = p.x;
+    room.setTarget(p.id, x, 500);
+    room.tick(0.1);
+    expect(p.x).toBeCloseTo(x);
+    expect(p.y).toBeCloseTo(1000 - MOVE_SPEED * 0.1);
+  });
+
+  it('필드 밖 좌표는 경계로 자른다', () => {
+    const room = new GameRoom();
+    const p = placed(room, 100, 1000);
+    room.setTarget(p.id, -500, 99999);
+    expect(p.targetX).toBe(FIELD_MARGIN);
+    expect(p.targetY).toBe(FIELD_HEIGHT - FIELD_MARGIN);
+    room.setTarget(p.id, 99999, -1);
+    expect(p.targetX).toBe(FIELD_WIDTH - FIELD_MARGIN);
+    expect(p.targetY).toBe(FIELD_MARGIN);
+  });
+
+  it('잘못된 좌표는 무시한다', () => {
+    const room = new GameRoom();
+    const p = placed(room, 100, 1000);
+    for (const [x, y] of [[NaN, 1], [1, Infinity], ['1', 2], [null, undefined]]) {
+      expect(room.setTarget(p.id, x, y)).toBe(false);
+    }
+    expect(p.targetX).toBe(100);
+  });
+
+  it('REVEAL·RESULT 단계에서는 이동 입력을 무시한다', () => {
+    const room = new GameRoom();
+    const p = placed(room, 100, 1000);
+    for (const phase of ['REVEAL', 'RESULT'] as const) {
+      room.state.phase = phase;
+      expect(room.setTarget(p.id, 300, 300)).toBe(false);
+    }
+    room.state.phase = 'QUESTION';
+    expect(room.setTarget(p.id, 300, 300)).toBe(true);
+  });
+
+  it('positions는 정수 좌표만 보낸다', () => {
+    const room = new GameRoom();
+    const p = placed(room, 100.4, 1000.6);
+    expect(room.positions()).toEqual([{ id: p.id, x: 100, y: 1001 }]);
+  });
+});
+
+describe('circleAt', () => {
+  it('원 중심·경계 안은 해당 알파벳, 밖은 null', () => {
+    expect(circleAt(192, 440)).toBe('A');
+    expect(circleAt(576 + 150, 440)).toBe('B'); // 경계 포함
+    expect(circleAt(384, 820 + 151)).toBeNull();
+    expect(circleAt(384, 1100)).toBeNull();
+    expect(circleAt(384, 440)).toBeNull(); // A·B 사이
+  });
+});
+
+describe('문제 진행 (6장)', () => {
+  const questions = loadQuestions(path.resolve(__dirname, '../data/questions.json'));
+
+  function setup() {
+    const room = new GameRoom(questions);
+    const a = joinOk(room, '철수');
+    const b = joinOk(room, '영희');
+    return { room, a, b };
+  }
+
+  function stand(p: { x: number; y: number; targetX: number; targetY: number }, choice: 'A' | 'B' | 'C' | null) {
+    const pos = choice ? ANSWER_CIRCLES[choice] : { x: 384, y: 1100 };
+    p.x = p.targetX = pos.x;
+    p.y = p.targetY = pos.y;
+  }
+
+  function codeOf(result: { ok: boolean; error?: { code: string } }) {
+    return result.ok ? 'OK' : result.error!.code;
+  }
+
+  it('LOBBY에서만 게임 시작, 연습 1번이 120초 타이머로 시작', () => {
+    const { room } = setup();
+    expect(codeOf(room.next())).toBe('INVALID_PHASE');
+    expect(codeOf(room.start(1000))).toBe('OK');
+    expect(room.state.phase).toBe('QUESTION');
+    expect(room.state.deadline).toBe(1000 + 120_000);
+    expect(codeOf(room.start())).toBe('INVALID_PHASE');
+    expect(room.snapshot().question).toMatchObject({ id: 'p1', number: 1, total: 3, stage: 'PRACTICE' });
+  });
+
+  it('플레이어용 스냅샷에는 문제 텍스트·정답·해설이 없다', () => {
+    const { room } = setup();
+    room.start();
+    const json = JSON.stringify(room.snapshot());
+    expect(json).not.toContain(questions[0].text);
+    expect(json).not.toContain(questions[0].explanation!);
+    expect(room.snapshot().question).not.toHaveProperty('answer');
+  });
+
+  it('판정: 원 안이면 해당 답, 밖이면 미제출. 정답 +10', () => {
+    const { room, a, b } = setup();
+    room.start(); // p1 정답 B
+    stand(a, 'B');
+    stand(b, null);
+    expect(room.tally()).toEqual({ A: 0, B: 1, C: 0, none: 1 });
+    expect(codeOf(room.reveal())).toBe('OK');
+    const round = room.revealPayload()!;
+    expect(round.correct).toBe('B');
+    expect(round.perPlayer[a.id]).toMatchObject({ answer: 'B', isCorrect: true, total: 10 });
+    expect(round.perPlayer[b.id]).toMatchObject({ answer: null, isCorrect: false, total: 0 });
+    expect(a.score).toBe(10);
+    expect(a.correctCount).toBe(1);
+    expect(room.snapshot().lastRound?.scores[a.id].score).toBe(10);
+  });
+
+  it('판정 후에는 이동할 수 없고, 타이머가 지난 QUESTION에서도 이동할 수 없다', () => {
+    const { room, a } = setup();
+    room.start(0);
+    expect(room.setTarget(a.id, 100, 100, 1000)).toBe(true);
+    expect(room.setTarget(a.id, 100, 100, 120_000)).toBe(false);
+    room.reveal();
+    expect(room.setTarget(a.id, 100, 100)).toBe(false);
+  });
+
+  it('게임 중 새로 들어온 플레이어도 판정에 포함된다', () => {
+    const { room } = setup();
+    room.start();
+    const late = joinOk(room, '민수');
+    stand(late, 'B');
+    room.reveal();
+    expect(late.score).toBe(10);
+  });
+
+  it('연습 3번 뒤에는 다음 문제 대신 본 게임 시작, 점수·정답 수·기록 초기화', () => {
+    const { room, a } = setup();
+    room.start();
+    for (let i = 0; i < 3; i++) {
+      stand(a, questions[i].answer);
+      room.reveal();
+      if (i < 2) expect(codeOf(room.next())).toBe('OK');
+    }
+    expect(a.score).toBe(30);
+    expect(codeOf(room.next())).toBe('INVALID_PHASE');
+    expect(codeOf(room.finish())).toBe('INVALID_PHASE');
+    expect(codeOf(room.startMain())).toBe('OK');
+    expect(a.score).toBe(0);
+    expect(a.correctCount).toBe(0);
+    expect(room.state.history).toEqual([]);
+    expect(room.snapshot().question).toMatchObject({ id: 'q1', number: 1, total: 20, stage: 'MAIN' });
+  });
+
+  it('본 게임 20번 뒤에만 결과 발표, 캐릭터 위치는 문제가 바뀌어도 유지', () => {
+    const { room, a, b } = setup();
+    room.start();
+    for (let i = 0; i < 3; i++) {
+      room.reveal();
+      if (i < 2) room.next();
+    }
+    room.startMain();
+    stand(b, 'C');
+    for (let i = 0; i < 20; i++) {
+      stand(a, questions[3 + i].answer);
+      if (i === 0) expect(b.x).toBe(ANSWER_CIRCLES.C.x);
+      room.reveal();
+      if (i < 19) {
+        expect(codeOf(room.finish())).toBe('INVALID_PHASE');
+        expect(codeOf(room.startMain())).toBe('INVALID_PHASE');
+        room.next();
+      }
+    }
+    expect(codeOf(room.next())).toBe('INVALID_PHASE');
+    expect(codeOf(room.finish())).toBe('OK');
+    expect(room.state.phase).toBe('RESULT');
+    const ranking = room.snapshot().ranking!;
+    expect(ranking[0]).toMatchObject({ nickname: '철수', score: 200, correctCount: 20, rank: 1 });
+    expect(ranking[1]).toMatchObject({ nickname: '영희', score: 70, correctCount: 7, rank: 2 });
+  });
+
+  it('새 게임은 플레이어를 모두 내보내고 관리자는 남긴다', () => {
+    const { room } = setup();
+    room.ensureAdmin();
+    room.start();
+    room.reset();
+    expect(room.state.phase).toBe('LOBBY');
+    expect(room.playerCount).toBe(0);
+    expect(room.admin).not.toBeNull();
+    expect(room.state.questions).toHaveLength(23);
+  });
+
+  it('관리자는 점수·집계에서 빠지고 위치만 브로드캐스트된다', () => {
+    const { room } = setup();
+    const admin = room.ensureAdmin();
+    admin.x = admin.targetX = ANSWER_CIRCLES.A.x;
+    admin.y = admin.targetY = ANSWER_CIRCLES.A.y;
+    expect(room.tally().A).toBe(0);
+    expect(room.positions().some((p) => p.id === ADMIN_ID)).toBe(true);
+    expect(room.setTarget(ADMIN_ID, 300, 300)).toBe(true);
+    expect(room.snapshot().players.some((p) => p.nickname === '관리자')).toBe(false);
   });
 });

@@ -1,5 +1,17 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { ADMIN_CHARACTER, CHARACTERS, MAX_PLAYERS, SPAWN_AREA } from '../../shared/constants.ts';
+import {
+  ADMIN_CHARACTER,
+  ADMIN_ID,
+  CHARACTERS,
+  DEFAULT_TIME_LIMIT_SEC,
+  FIELD_HEIGHT,
+  FIELD_WIDTH,
+  FIELD_MARGIN,
+  MAX_PLAYERS,
+  MOVE_SPEED,
+  SPAWN_AREA,
+  circleAt,
+} from '../../shared/constants.ts';
 import {
   isReservedNickname,
   isValidNicknameLength,
@@ -7,15 +19,27 @@ import {
   normalizeNickname,
 } from '../../shared/nickname.ts';
 import type {
+  AdminAvatar,
+  AnswerTally,
   CharacterKey,
   ErrorPayload,
   Player,
+  PlayerPosition,
   PublicPlayer,
+  PublicQuestion,
+  Question,
+  RankingEntry,
+  RevealPayload,
   Room,
   StateSnapshot,
 } from '../../shared/types.ts';
+import { judgeRound, rankPlayers } from './scoring.ts';
 
 export type JoinResult = { ok: true; player: Player } | { ok: false; error: ErrorPayload };
+export type CommandResult = { ok: true } | { ok: false; error: ErrorPayload };
+
+const OK: CommandResult = { ok: true };
+const WRONG_PHASE = () => fail('INVALID_PHASE', '지금 단계에서는 할 수 없는 동작입니다.');
 
 const CHARACTER_KEYS = new Set<string>(CHARACTERS.map((c) => c.key));
 
@@ -23,23 +47,43 @@ function fail(code: ErrorPayload['code'], message: string): { ok: false; error: 
   return { ok: false, error: { code, message } };
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
 function randomBetween(min: number, max: number): number {
   return Math.round(min + Math.random() * (max - min));
 }
+
+function spawnPoint(): { x: number; y: number } {
+  return {
+    x: randomBetween(SPAWN_AREA.minX, SPAWN_AREA.maxX),
+    y: randomBetween(SPAWN_AREA.minY, SPAWN_AREA.maxY),
+  };
+}
+
+interface Mover { x: number; y: number; targetX: number; targetY: number }
 
 export function isCharacterKey(value: unknown): value is CharacterKey {
   return typeof value === 'string' && value !== ADMIN_CHARACTER && CHARACTER_KEYS.has(value);
 }
 
 export class GameRoom {
-  state: Room = GameRoom.emptyRoom();
+  state: Room;
+  admin: AdminAvatar | null = null;
+  ranking: RankingEntry[] | null = null;
+  questionStartedAt: number | null = null;
 
-  private static emptyRoom(): Room {
+  constructor(questions: Question[] = []) {
+    this.state = GameRoom.emptyRoom(questions);
+  }
+
+  private static emptyRoom(questions: Question[]): Room {
     return {
       phase: 'LOBBY',
       stage: 'PRACTICE',
       players: {},
-      questions: [],
+      questions,
       currentIndex: -1,
       actions: {},
       history: [],
@@ -69,8 +113,7 @@ export class GameRoom {
       return fail('ROOM_FULL', `방이 가득 찼습니다 (${MAX_PLAYERS}/${MAX_PLAYERS})`);
     }
 
-    const x = randomBetween(SPAWN_AREA.minX, SPAWN_AREA.maxX);
-    const y = randomBetween(SPAWN_AREA.minY, SPAWN_AREA.maxY);
+    const { x, y } = spawnPoint();
     const player: Player = {
       id: randomUUID(),
       sessionToken: randomBytes(24).toString('base64url'),
@@ -102,15 +145,219 @@ export class GameRoom {
     if (player) player.connected = connected;
   }
 
-  snapshot(): StateSnapshot {
+  // 관리자 고정 캐릭터. 처음 인증할 때 만들고, 이후에는 접속 상태만 바꾼다.
+  ensureAdmin(): AdminAvatar {
+    if (!this.admin) {
+      const { x, y } = spawnPoint();
+      this.admin = { x, y, targetX: x, targetY: y, connected: true };
+    }
+    this.admin.connected = true;
+    return this.admin;
+  }
+
+  setAdminConnected(connected: boolean): void {
+    if (this.admin) this.admin.connected = connected;
+  }
+
+  // 5장: 터치한 목표 지점. 필드 밖 좌표는 경계로 자른다. id가 ADMIN_ID면 관리자 캐릭터.
+  setTarget(id: string, x: unknown, y: unknown, now = Date.now()): boolean {
+    const mover: Mover | undefined = id === ADMIN_ID ? this.admin ?? undefined : this.state.players[id];
+    if (!mover || !this.canMove(now)) return false;
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)) {
+      return false;
+    }
+    mover.targetX = clamp(x, FIELD_MARGIN, FIELD_WIDTH - FIELD_MARGIN);
+    mover.targetY = clamp(y, FIELD_MARGIN, FIELD_HEIGHT - FIELD_MARGIN);
+    return true;
+  }
+
+  // 모든 캐릭터를 목표 지점 쪽으로 직선 이동. 움직인 캐릭터가 있으면 true.
+  tick(dtSec: number): boolean {
+    const step = MOVE_SPEED * dtSec;
+    let moved = false;
+    const movers: Mover[] = Object.values(this.state.players);
+    if (this.admin) movers.push(this.admin);
+    for (const p of movers) {
+      const dx = p.targetX - p.x;
+      const dy = p.targetY - p.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist === 0) continue;
+      if (dist <= step) {
+        p.x = p.targetX;
+        p.y = p.targetY;
+      } else {
+        p.x += (dx / dist) * step;
+        p.y += (dy / dist) * step;
+      }
+      moved = true;
+    }
+    return moved;
+  }
+
+  positions(): PlayerPosition[] {
+    const list = Object.values(this.state.players).map((p) => ({
+      id: p.id,
+      x: Math.round(p.x),
+      y: Math.round(p.y),
+    }));
+    if (this.admin) list.push({ id: ADMIN_ID, x: Math.round(this.admin.x), y: Math.round(this.admin.y) });
+    return list;
+  }
+
+  // 6장: 관리자 화면의 「현재 A/B/C/미제출 인원 수」
+  tally(): AnswerTally {
+    const tally: AnswerTally = { A: 0, B: 0, C: 0, none: 0 };
+    for (const p of Object.values(this.state.players)) {
+      const choice = circleAt(p.x, p.y);
+      if (choice) tally[choice]++;
+      else tally.none++;
+    }
+    return tally;
+  }
+
+  currentQuestion(): Question | null {
+    return this.state.questions[this.state.currentIndex] ?? null;
+  }
+
+  // ─── 6장 단계 전환 (관리자 버튼과 타이머) ───
+
+  start(now = Date.now()): CommandResult {
+    if (this.state.phase !== 'LOBBY' || this.state.questions.length === 0) return WRONG_PHASE();
+    this.startQuestion(0, now);
+    return OK;
+  }
+
+  // 타이머 종료 또는 「정답 바로 발표」: 지금 서버 위치로 판정한다.
+  reveal(): CommandResult {
+    const question = this.currentQuestion();
+    if (this.state.phase !== 'QUESTION' || !question) return WRONG_PHASE();
+
+    const players = Object.values(this.state.players);
+    const result = judgeRound(
+      question.id,
+      question.stage,
+      question.answer,
+      players.map((p) => ({ id: p.id, answer: circleAt(p.x, p.y), connected: p.connected })),
+      this.state.actions,
+    );
+    for (const p of players) {
+      const r = result.perPlayer[p.id];
+      p.score += r.total;
+      if (r.isCorrect) p.correctCount++;
+      // 판정 뒤에는 움직이지 않도록 목표를 현재 위치로 고정
+      p.targetX = p.x;
+      p.targetY = p.y;
+    }
+    if (this.admin) {
+      this.admin.targetX = this.admin.x;
+      this.admin.targetY = this.admin.y;
+    }
+    this.state.history.push(result);
+    this.state.phase = 'REVEAL';
+    this.state.deadline = undefined;
+    return OK;
+  }
+
+  next(now = Date.now()): CommandResult {
+    const nextQuestion = this.state.questions[this.state.currentIndex + 1];
+    if (this.state.phase !== 'REVEAL' || !nextQuestion || nextQuestion.stage !== this.state.stage) {
+      return WRONG_PHASE();
+    }
+    this.startQuestion(this.state.currentIndex + 1, now);
+    return OK;
+  }
+
+  // 연습 마지막 문제 정답 공개 뒤에만. 점수·정답 수·기록을 모두 초기화하고 본 게임 1번 시작.
+  startMain(now = Date.now()): CommandResult {
+    const nextQuestion = this.state.questions[this.state.currentIndex + 1];
+    if (this.state.phase !== 'REVEAL' || this.state.stage !== 'PRACTICE' || nextQuestion?.stage !== 'MAIN') {
+      return WRONG_PHASE();
+    }
+    for (const p of Object.values(this.state.players)) {
+      p.score = 0;
+      p.correctCount = 0;
+    }
+    this.state.history = [];
+    this.startQuestion(this.state.currentIndex + 1, now);
+    return OK;
+  }
+
+  // 본 게임 마지막 문제 정답 공개 뒤에만.
+  finish(): CommandResult {
+    const isLast = this.state.currentIndex === this.state.questions.length - 1;
+    if (this.state.phase !== 'REVEAL' || this.state.stage !== 'MAIN' || !isLast) return WRONG_PHASE();
+    this.state.phase = 'RESULT';
+    this.ranking = rankPlayers(Object.values(this.state.players));
+    return OK;
+  }
+
+  // 「새 게임」: 플레이어를 모두 내보내고 처음 상태로. 관리자는 그대로 남는다.
+  reset(): void {
+    this.state = GameRoom.emptyRoom(this.state.questions);
+    this.ranking = null;
+    this.questionStartedAt = null;
+  }
+
+  revealPayload(): RevealPayload | null {
+    const last = this.state.history.at(-1);
+    if (this.state.phase !== 'REVEAL' || !last) return null;
+    const scores: RevealPayload['scores'] = {};
+    for (const p of Object.values(this.state.players)) {
+      scores[p.id] = { score: p.score, correctCount: p.correctCount };
+    }
+    return { ...last, scores };
+  }
+
+  publicQuestion(): PublicQuestion | null {
+    const q = this.currentQuestion();
+    if (!q) return null;
+    const sameStage = this.state.questions.filter((x) => x.stage === q.stage);
     return {
-      phase: this.state.phase,
+      id: q.id,
+      stage: q.stage,
+      topic: q.topic,
+      choices: q.choices,
+      ...(q.imageUrl ? { imageUrl: q.imageUrl } : {}),
+      number: sameStage.indexOf(q) + 1,
+      total: sameStage.length,
+    };
+  }
+
+  snapshot(now = Date.now()): StateSnapshot {
+    const { phase } = this.state;
+    const inRound = phase === 'QUESTION' || phase === 'REVEAL';
+    return {
+      phase,
       stage: this.state.stage,
       players: Object.values(this.state.players).map(toPublicPlayer),
       maxPlayers: MAX_PLAYERS,
-      question: null,
+      admin: this.admin
+        ? { x: Math.round(this.admin.x), y: Math.round(this.admin.y), connected: this.admin.connected }
+        : null,
+      question: inRound ? this.publicQuestion() : null,
+      questionStartedAt: phase === 'QUESTION' ? this.questionStartedAt : null,
       deadline: this.state.deadline ?? null,
+      serverNow: now,
+      lastRound: this.revealPayload(),
+      ranking: phase === 'RESULT' ? this.ranking : null,
     };
+  }
+
+  private startQuestion(index: number, now: number): void {
+    const question = this.state.questions[index];
+    this.state.currentIndex = index;
+    this.state.stage = question.stage;
+    this.state.phase = 'QUESTION';
+    this.state.actions = {};
+    this.questionStartedAt = now;
+    this.state.deadline = now + (question.timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC) * 1000;
+  }
+
+  // 대기실과 문제 진행 중(타이머가 끝나기 전)에만 움직일 수 있다
+  private canMove(now: number): boolean {
+    const { phase, deadline } = this.state;
+    if (phase === 'LOBBY') return true;
+    return phase === 'QUESTION' && (deadline === undefined || now < deadline);
   }
 
   private findByNickname(nickname: string): Player | undefined {
@@ -124,8 +371,8 @@ export function toPublicPlayer(p: Player): PublicPlayer {
     id: p.id,
     nickname: p.nickname,
     character: p.character,
-    x: p.x,
-    y: p.y,
+    x: Math.round(p.x),
+    y: Math.round(p.y),
     score: p.score,
     correctCount: p.correctCount,
     connected: p.connected,

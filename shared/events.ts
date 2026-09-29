@@ -1,5 +1,19 @@
 // 10장 이벤트 이름. 이후 단계에서 쓰는 이벤트도 미리 모아 둔다.
-import type { ErrorPayload, JoinAck, JoinPayload, ResumePayload, StateSnapshot } from './types.ts';
+import type {
+  AdminAuthAck,
+  AdminAuthPayload,
+  AnswerTally,
+  ErrorPayload,
+  JoinAck,
+  JoinPayload,
+  MovePayload,
+  PlayerPosition,
+  Question,
+  RankingEntry,
+  ResumePayload,
+  RevealPayload,
+  StateSnapshot,
+} from './types.ts';
 
 export const EV = {
   // 클라이언트 → 서버
@@ -27,9 +41,15 @@ export const EV = {
   ERROR: 'error',
 } as const;
 
-// M1에서 쓰는 이벤트의 Socket.IO 타입. 단계가 진행되며 추가한다.
+// 지금까지 구현한 이벤트의 Socket.IO 타입. 단계가 진행되며 추가한다.
 export interface ServerToClientEvents {
   'state:snapshot': (snapshot: StateSnapshot) => void;
+  'state:positions': (positions: PlayerPosition[]) => void;
+  'admin:question': (question: Question | null) => void;
+  'admin:tally': (tally: AnswerTally) => void;
+  'round:reveal': (payload: RevealPayload) => void;
+  'game:mainStart': () => void;
+  'game:result': (ranking: RankingEntry[]) => void;
   'room:reset': () => void;
   'error': (error: ErrorPayload) => void;
 }
@@ -37,4 +57,12 @@ export interface ServerToClientEvents {
 export interface ClientToServerEvents {
   'player:join': (payload: JoinPayload, ack: (res: JoinAck) => void) => void;
   'player:resume': (payload: ResumePayload, ack: (res: JoinAck) => void) => void;
+  'player:move': (payload: MovePayload) => void;
+  'admin:auth': (payload: AdminAuthPayload, ack: (res: AdminAuthAck) => void) => void;
+  'admin:start': () => void;
+  'admin:revealNow': () => void;
+  'admin:next': () => void;
+  'admin:startMain': () => void;
+  'admin:finish': () => void;
+  'admin:reset': () => void;
 }
