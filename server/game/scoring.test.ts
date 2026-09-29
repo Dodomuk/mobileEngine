@@ -19,17 +19,17 @@ describe('judgeRound', () => {
         영희: { type: 'BET_WRONG', targetId: '철수' },
         민수: { type: 'BET_WRONG', targetId: '영희' },
         지연: { type: 'BET_CORRECT', targetId: '철수' },
-        현우: { type: 'LAUGH' },
+        현우: { type: 'NONE' },
       },
     );
     const summary = Object.fromEntries(
       Object.entries(result.perPlayer).map(([id, r]) => [id, [r.baseDelta, r.actionDelta, r.total]]),
     );
     expect(summary).toEqual({
-      철수: [10, -2, 8],
-      영희: [0, -2, -2],
-      민수: [0, 2, 2],
-      지연: [10, 2, 12],
+      철수: [10, -3, 7],
+      영희: [0, -3, -3],
+      민수: [0, 3, 3],
+      지연: [10, 3, 13],
       현우: [0, 0, 0],
     });
     expect(result.perPlayer.민수.answer).toBeNull();
@@ -64,7 +64,7 @@ describe('judgeRound', () => {
       { a: { type: 'BET_CORRECT', targetId: 'a' }, b: { type: 'BET_CORRECT', targetId: 'a' } },
     );
     expect(result.perPlayer.a.actionDelta).toBe(0);
-    expect(result.perPlayer.b.actionDelta).toBe(2);
+    expect(result.perPlayer.b.actionDelta).toBe(3);
   });
 });
 

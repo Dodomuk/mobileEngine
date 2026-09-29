@@ -171,12 +171,13 @@ io.on('connection', (socket: GameSocket) => {
       return;
     }
     ack({ ok: true, action: result.action });
-    if (result.laugh) io.emit('player:laugh', { playerId });
   });
 
-  socket.on('player:laugh', () => {
+  socket.on('player:emote', (payload) => {
     const { playerId } = socket.data;
-    if (playerId && room.laugh(playerId).ok) io.emit('player:laugh', { playerId });
+    if (!playerId) return;
+    const emote = payload?.emote;
+    if (room.emote(playerId, emote).ok) io.emit('player:emote', { playerId, emote });
   });
 
   socket.on('admin:auth', (payload, ack) => {

@@ -94,14 +94,12 @@ body {
 
 .character-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
 }
 
-/* 3개 + 2개(가운데 정렬) 배치 */
 .character-card {
-  grid-column: span 2;
-  min-height: 108px;
+  min-height: 96px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -117,10 +115,6 @@ body {
   color: var(--ink);
   cursor: pointer;
   transition: transform 0.12s, border-color 0.12s, background 0.12s;
-}
-
-.character-card:nth-child(4) {
-  grid-column: 2 / span 2;
 }
 
 .character-card:active {
@@ -268,12 +262,18 @@ body {
     gap: 6px;
   }
 
-  .character-card,
-  .character-card:nth-child(4) {
-    grid-column: auto;
-    min-height: 84px;
-    padding: 6px 2px;
-    font-size: 12px;
+  .character-card {
+    min-height: 74px;
+    padding: 4px 2px;
+    gap: 2px;
+    font-size: 11px;
+    letter-spacing: -0.5px;
+    white-space: nowrap;
+  }
+
+  .character-card .avatar {
+    width: 48px !important;
+    height: 48px !important;
   }
 }
 
@@ -458,24 +458,29 @@ body {
   font-weight: 700;
 }
 
-/* 7장 추가 행동 아이콘(우측 상단) */
+/* 7장 우측 상단: 윗줄 찍기 기술(맞힘·틀림·초기화), 아랫줄 이모티콘 */
 .action-bar {
   flex: none;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 3px;
+  gap: 4px;
   pointer-events: auto;
 }
 
-.action-buttons {
+.action-row {
   display: flex;
+  align-items: center;
   gap: 4px;
 }
 
+.action-row[hidden] {
+  display: none;
+}
+
 .action-button {
-  width: 44px;
-  height: 44px;
+  height: 40px;
+  min-width: 40px;
   display: grid;
   place-items: center;
   padding: 0;
@@ -483,10 +488,34 @@ body {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.95);
   box-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
-  font-size: 22px;
+  font-size: 20px;
   font-weight: 900;
   color: #495057;
   cursor: pointer;
+}
+
+.bet-button {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  font-size: 15px;
+}
+
+.bet-button small {
+  font-size: 13px;
+  font-weight: 900;
+  color: #1f2a24;
+}
+
+.bet-button[data-action='NONE'] {
+  font-size: 13px;
+  color: #495057;
+}
+
+.emote-button {
+  width: 40px;
+  font-size: 22px;
 }
 
 .action-button.selected {
@@ -504,12 +533,12 @@ body {
 }
 
 .action-target {
-  padding: 2px 8px;
+  padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(20, 30, 25, 0.8);
+  background: rgba(20, 30, 25, 0.85);
   color: #fff;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 800;
   white-space: nowrap;
 }
 

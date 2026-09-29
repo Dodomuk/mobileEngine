@@ -1,4 +1,4 @@
-import type { CharacterKey, Choice } from './types.ts';
+import type { CharacterKey, Choice, EmoteType } from './types.ts';
 
 // 5장: 1440×800 논리 좌표계(가로 화면)
 export const FIELD_WIDTH = 1440;
@@ -10,7 +10,7 @@ export const FIELD_MARGIN = 32;
 export const FIELD_MARGIN_BOTTOM = 72;
 
 // 5장: 시작 위치는 하단 대기 영역(y 670~720)
-export const SPAWN_AREA = { minX: 120, maxX: FIELD_WIDTH - 120, minY: 670, maxY: 720 };
+export const SPAWN_AREA = { minX: 220, maxX: FIELD_WIDTH - 220, minY: 670, maxY: 720 }; // 광장 안쪽
 
 // 5장: 상단 약 300은 문제 UI와 선택지 글자 자리라 원을 두지 않는다.
 // 세 원은 한 줄로 놓이고 서로 겹치지 않는다(중심 간 거리 420 ≥ 지름 300).
@@ -36,10 +36,18 @@ export const MAIN_COUNT = 20;
 
 export const DEFAULT_TIME_LIMIT_SEC = 120;
 export const SCORE_CORRECT = 10;
-export const SCORE_BET = 2;
-// 7장: 웃기 말풍선 표시 시간과 연타 방지 쿨다운
-export const LAUGH_BUBBLE_MS = 3000;
-export const LAUGH_COOLDOWN_MS = 1000;
+export const SCORE_BET = 3;
+// 7장: 이모티콘 말풍선 표시 시간과 연타 방지 쿨다운
+export const EMOTE_BUBBLE_MS = 3000;
+export const EMOTE_COOLDOWN_MS = 1000;
+
+export const EMOTES: { type: EmoteType; emoji: string; label: string }[] = [
+  { type: 'LAUGH', emoji: '😆', label: '웃기' },
+  { type: 'CRY', emoji: '😭', label: '울기' },
+  { type: 'ANGRY', emoji: '😡', label: '화내기' },
+  { type: 'THUMBS_UP', emoji: '👍', label: '따봉' },
+  { type: 'THUMBS_DOWN', emoji: '👎', label: '역따봉' },
+];
 
 export const CHARACTERS: { key: CharacterKey; name: string; color: string }[] = [
   { key: 'orange_mushroom', name: '주황버섯', color: '#f39c3d' },
@@ -47,6 +55,16 @@ export const CHARACTERS: { key: CharacterKey; name: string; color: string }[] = 
   { key: 'slime', name: '슬라임', color: '#5cc26b' },
   { key: 'pepe', name: '페페', color: '#3f9bd8' },
   { key: 'pig', name: '돼지', color: '#f08bb0' },
+  { key: 'green_mushroom', name: '초록 버섯', color: '#40c057' },
+  { key: 'ribbon_pig', name: '리본 돼지', color: '#f06595' },
+  { key: 'red_snail', name: '빨간 달팽이', color: '#e8453c' },
+  { key: 'blue_slime', name: '파란 슬라임', color: '#4dabf7' },
+  { key: 'dark_pepe', name: '다크 페페', color: '#495057' },
+  { key: 'warrior', name: '전사', color: '#c92a2a' },
+  { key: 'archer', name: '궁수', color: '#37b24d' },
+  { key: 'magician', name: '마법사', color: '#4263eb' },
+  { key: 'thief', name: '도적', color: '#6741d9' },
+  { key: 'pirate', name: '해적', color: '#1c5ea8' },
 ];
 
 // 4장: 관리자 고정 캐릭터·닉네임. 플레이어는 선택·사용 불가

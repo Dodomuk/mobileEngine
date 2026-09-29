@@ -1,11 +1,17 @@
 // 10장 데이터 모델. 서버 전용 필드(sessionToken, 정답 등)는 Public* 타입으로 걸러서 보낸다.
 
-export type CharacterKey = 'orange_mushroom' | 'snail' | 'slime' | 'pepe' | 'pig';
+export type CharacterKey =
+  | 'orange_mushroom' | 'snail' | 'slime' | 'pepe' | 'pig'
+  | 'green_mushroom' | 'ribbon_pig' | 'red_snail' | 'blue_slime' | 'dark_pepe'
+  | 'warrior' | 'archer' | 'magician' | 'thief' | 'pirate';
 export type AdminCharacterKey = 'admin'; // 관리자 전용, 플레이어 선택 불가
 export type Choice = 'A' | 'B' | 'C';
 export type Phase = 'LOBBY' | 'QUESTION' | 'REVEAL' | 'RESULT';
 export type Stage = 'PRACTICE' | 'MAIN';
-export type ActionType = 'BET_CORRECT' | 'BET_WRONG' | 'LAUGH' | 'NONE';
+// 찍기 기술. NONE은 「초기화」(찍지 않음)
+export type ActionType = 'BET_CORRECT' | 'BET_WRONG' | 'NONE';
+// 이모티콘은 찍기와 별개로 언제든(대기실·문제·정답 공개) 보낼 수 있고 점수와 무관하다
+export type EmoteType = 'LAUGH' | 'CRY' | 'ANGRY' | 'THUMBS_UP' | 'THUMBS_DOWN';
 
 export interface Player {
   id: string; sessionToken: string; nickname: string; character: CharacterKey;
@@ -108,6 +114,8 @@ export type JoinAck =
   | { ok: false; error: ErrorPayload };
 
 export interface ActionPayload { type: ActionType; targetId?: string }
+export interface EmotePayload { emote: EmoteType }
+export interface EmoteEvent { playerId: string; emote: EmoteType }
 export type ActionAck = { ok: true; action: RoundAction } | { ok: false; error: ErrorPayload };
 
 export interface AdminAuthPayload { pin?: string; token?: string }

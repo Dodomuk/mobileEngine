@@ -1,7 +1,8 @@
-import { MAIN_COUNT } from '../../../shared/constants.ts';
+import { EMOTES, MAIN_COUNT } from '../../../shared/constants.ts';
 import type {
   ActionType,
   Choice,
+  EmoteType,
   PlayerPosition,
   PublicPlayer,
   RoundAction,
@@ -19,16 +20,15 @@ export interface GameScreen {
   update(snapshot: StateSnapshot, myId: string): void;
   applyPositions(positions: PlayerPosition[]): void;
   setMyAction(action: RoundAction): void;
-  showLaugh(playerId: string): void;
+  showEmote(playerId: string, emote: EmoteType): void;
   destroy(): void;
 }
 
-// 7장 추가 행동 아이콘(우측 상단)
-const ACTIONS: { type: ActionType; icon: string; label: string }[] = [
-  { type: 'BET_CORRECT', icon: '👍', label: '맞히기 찍기' },
-  { type: 'BET_WRONG', icon: '👎', label: '틀리기 찍기' },
-  { type: 'LAUGH', icon: '😆', label: '그저 웃는다' },
-  { type: 'NONE', icon: '✕', label: '아무것도 안 함' },
+// 7장 찍기 기술(우측 상단 윗줄). 이모티콘은 아랫줄에 따로 둔다.
+const ACTIONS: { type: ActionType; html: string; label: string }[] = [
+  { type: 'BET_CORRECT', html: '⭕<small>맞힘</small>', label: '맞힐 사람 찍기' },
+  { type: 'BET_WRONG', html: '❌<small>틀림</small>', label: '틀릴 사람 찍기' },
+  { type: 'NONE', html: '초기화', label: '찍기 초기화' },
 ];
 
 const NO_ACTION: RoundAction = { type: 'NONE' };
@@ -51,10 +51,13 @@ export function renderGame(root: HTMLElement): GameScreen {
           <p class="reveal-note" hidden></p>
         </div>
         <div class="action-bar" hidden>
-          <div class="action-buttons">
-            ${ACTIONS.map((a) => `<button type="button" class="action-button" data-action="${a.type}" aria-label="${a.label}">${a.icon}</button>`).join('')}
+          <div class="action-row bet-row">
+            <span class="action-target"></span>
+            ${ACTIONS.map((a) => `<button type="button" class="action-button bet-button" data-action="${a.type}" aria-label="${a.label}">${a.html}</button>`).join('')}
           </div>
-          <span class="action-target"></span>
+          <div class="action-row emote-row">
+            ${EMOTES.map((e) => `<button type="button" class="action-button emote-button" data-emote="${e.type}" aria-label="${e.label}">${e.emoji}</button>`).join('')}
+          </div>
         </div>
       </div>
       <div class="hud-bottom">
@@ -83,6 +86,7 @@ export function renderGame(root: HTMLElement): GameScreen {
   const revealNote = $<HTMLParagraphElement>('.reveal-note');
   const actionBar = $<HTMLElement>('.action-bar');
   const actionTarget = $<HTMLElement>('.action-target');
+  const betRow = $<HTMLElement>('.bet-row');
   const myScore = $<HTMLSpanElement>('.my-score');
   const myChoice = $<HTMLSpanElement>('.my-choice');
   const modal = $<HTMLElement>('.target-modal');
@@ -126,21 +130,21 @@ export function renderGame(root: HTMLElement): GameScreen {
 
   function renderActions(): void {
     const phase = snapshot?.phase;
-    actionBar.hidden = phase !== 'QUESTION' && phase !== 'REVEAL';
+    // 이모티콘은 대기실·문제·정답 공개 때, 찍기는 문제·정답 공개 때(공개 중에는 비활성) 보인다
+    actionBar.hidden = phase === 'RESULT' || !snapshot;
+    betRow.hidden = phase !== 'QUESTION' && phase !== 'REVEAL';
     const open = phase === 'QUESTION';
     const noTargets = targets().length === 0;
     for (const a of ACTIONS) {
       const btn = actionButtons.get(a.type)!;
-      btn.classList.toggle('selected', myAction.type === a.type);
-      // 정답 공개 때는 3번 웃기만 누를 수 있다
+      btn.classList.toggle('selected', a.type !== 'NONE' && myAction.type === a.type);
       const bet = a.type === 'BET_CORRECT' || a.type === 'BET_WRONG';
-      btn.disabled = phase === 'REVEAL' ? a.type !== 'LAUGH' : !open || (bet && noTargets);
+      btn.disabled = !open || (bet && noTargets) || (a.type === 'NONE' && myAction.type === 'NONE');
     }
     const targetName = snapshot?.players.find((p) => p.id === myAction.targetId)?.nickname ?? '';
     actionTarget.textContent =
-      myAction.type === 'BET_CORRECT' ? `맞히기: ${targetName}`
-      : myAction.type === 'BET_WRONG' ? `틀리기: ${targetName}`
-      : myAction.type === 'LAUGH' ? '웃는 중'
+      myAction.type === 'BET_CORRECT' ? `⭕ ${targetName}`
+      : myAction.type === 'BET_WRONG' ? `❌ ${targetName}`
       : '';
   }
 
@@ -156,7 +160,9 @@ export function renderGame(root: HTMLElement): GameScreen {
   }
 
   function openTargetModal(type: 'BET_CORRECT' | 'BET_WRONG'): void {
-    modalTitle.textContent = type === 'BET_CORRECT' ? '👍 이번 문제를 맞힐 사람은?' : '👎 이번 문제를 틀릴 사람은?';
+    modalTitle.textContent = type === 'BET_CORRECT'
+      ? '⭕ 이번 문제를 맞힐 사람은? (맞히면 +3, 틀리면 -3)'
+      : '❌ 이번 문제를 틀릴 사람은? (틀리면 +3, 맞히면 -3)';
     modalList.replaceChildren(
       ...targets().map((p) => {
         const li = document.createElement('li');
@@ -179,13 +185,15 @@ export function renderGame(root: HTMLElement): GameScreen {
 
   for (const a of ACTIONS) {
     actionButtons.get(a.type)!.addEventListener('click', () => {
-      if (snapshot?.phase === 'REVEAL') {
-        if (a.type === 'LAUGH') socket.emit('player:laugh');
-        return;
-      }
       if (!questionOpen()) return;
       if (a.type === 'BET_CORRECT' || a.type === 'BET_WRONG') openTargetModal(a.type);
       else sendAction(a.type);
+    });
+  }
+  // 이모티콘: 누르면 바로 모두에게 말풍선. 연타는 서버가 1초 쿨다운으로 거른다.
+  for (const e of EMOTES) {
+    root.querySelector<HTMLButtonElement>(`[data-emote="${e.type}"]`)!.addEventListener('click', () => {
+      socket.emit('player:emote', { emote: e.type });
     });
   }
   $('.target-cancel').addEventListener('click', () => {
@@ -236,7 +244,7 @@ export function renderGame(root: HTMLElement): GameScreen {
         const verdict = !mine ? '이번 문제는 참여하지 않았어요'
           : `${mine.isCorrect ? '정답!' : '오답'} ${signed(mine.total)}점`;
         revealNote.textContent = `정답은 ${round.correct} · ${verdict}`
-          + (round.stage === 'PRACTICE' ? ' · 연습게임 점수는 본 게임에 반영되지 않습니다' : '');
+          + (round.stage === 'PRACTICE' ? ' · 연습 점수는 본 게임 미반영' : '');
       }
 
       // 하단: 내 점수(연습 중에는 「(연습)」 표시)
@@ -265,8 +273,8 @@ export function renderGame(root: HTMLElement): GameScreen {
       actionQuestionId = snapshot?.question?.id ?? actionQuestionId;
       renderActions();
     },
-    showLaugh(playerId) {
-      field.showLaugh(playerId);
+    showEmote(playerId, emote) {
+      field.showEmote(playerId, emote);
     },
     destroy() {
       timer.destroy();

@@ -4,7 +4,8 @@ import {
   ADMIN_ID,
   CHARACTERS,
   DEFAULT_TIME_LIMIT_SEC,
-  LAUGH_COOLDOWN_MS,
+  EMOTE_COOLDOWN_MS,
+  EMOTES,
   FIELD_HEIGHT,
   FIELD_WIDTH,
   FIELD_MARGIN,
@@ -43,8 +44,9 @@ export type JoinResult = { ok: true; player: Player } | { ok: false; error: Erro
 export type CommandResult = { ok: true } | { ok: false; error: ErrorPayload };
 
 const OK: CommandResult = { ok: true };
-const ACTION_TYPES = new Set<ActionType>(['BET_CORRECT', 'BET_WRONG', 'LAUGH', 'NONE']);
-export type ActionResult = { ok: true; action: RoundAction; laugh: boolean } | { ok: false; error: ErrorPayload };
+const ACTION_TYPES = new Set<ActionType>(['BET_CORRECT', 'BET_WRONG', 'NONE']);
+const EMOTE_TYPES = new Set<string>(EMOTES.map((e) => e.type));
+export type ActionResult = { ok: true; action: RoundAction } | { ok: false; error: ErrorPayload };
 const WRONG_PHASE = () => fail('INVALID_PHASE', '지금 단계에서는 할 수 없는 동작입니다.');
 
 const CHARACTER_KEYS = new Set<string>(CHARACTERS.map((c) => c.key));
@@ -79,7 +81,7 @@ export class GameRoom {
   admin: AdminAvatar | null = null;
   ranking: RankingEntry[] | null = null;
   questionStartedAt: number | null = null;
-  private lastLaughAt = new Map<string, number>();
+  private lastEmoteAt = new Map<string, number>();
 
   constructor(questions: Question[] = []) {
     this.state = GameRoom.emptyRoom(questions);
@@ -232,8 +234,8 @@ export class GameRoom {
     return this.state.actions[playerId] ?? { type: 'NONE' };
   }
 
-  // 문제 진행 중(타이머가 도는 동안)에만 고르고 바꿀 수 있다. 판정 시점의 선택이 최종.
-  // 3번(웃기)을 고르면 말풍선도 띄운다(1초 쿨다운).
+  // 찍기는 문제 진행 중(타이머가 도는 동안)에만 고르고 바꿀 수 있다. 판정 시점의 선택이 최종.
+  // NONE은 「초기화」: 찍기를 취소한다.
   setAction(playerId: string, type: unknown, targetId: unknown, now = Date.now()): ActionResult {
     const player = this.state.players[playerId];
     if (!player) return fail('INVALID_PAYLOAD', '잘못된 요청입니다.');
@@ -250,26 +252,21 @@ export class GameRoom {
       }
       action = { type, targetId };
     } else {
-      action = { type: type as 'LAUGH' | 'NONE' };
+      action = { type: 'NONE' };
     }
     this.state.actions[playerId] = action;
-    const laugh = action.type === 'LAUGH' && this.consumeLaugh(playerId, now);
-    return { ok: true, action, laugh };
+    return { ok: true, action };
   }
 
-  // 정답 공개 때는 3번 웃기만 허용. 말풍선만 띄우고 이번 문제의 행동은 바꾸지 않는다.
-  laugh(playerId: string, now = Date.now()): CommandResult {
+  // 이모티콘: 찍기와 별개로 대기실·문제 진행·정답 공개 중에 말풍선을 띄운다(1초 쿨다운, 점수 무관).
+  emote(playerId: string, emote: unknown, now = Date.now()): CommandResult {
     if (!this.state.players[playerId]) return fail('INVALID_PAYLOAD', '잘못된 요청입니다.');
-    if (this.state.phase !== 'REVEAL') return WRONG_PHASE();
-    if (!this.consumeLaugh(playerId, now)) return fail('COOLDOWN', '잠시 후 다시 눌러 주세요.');
+    if (typeof emote !== 'string' || !EMOTE_TYPES.has(emote)) return fail('INVALID_PAYLOAD', '잘못된 이모티콘입니다.');
+    if (this.state.phase === 'RESULT') return WRONG_PHASE();
+    const last = this.lastEmoteAt.get(playerId);
+    if (last !== undefined && now - last < EMOTE_COOLDOWN_MS) return fail('COOLDOWN', '잠시 후 다시 눌러 주세요.');
+    this.lastEmoteAt.set(playerId, now);
     return OK;
-  }
-
-  private consumeLaugh(playerId: string, now: number): boolean {
-    const last = this.lastLaughAt.get(playerId);
-    if (last !== undefined && now - last < LAUGH_COOLDOWN_MS) return false;
-    this.lastLaughAt.set(playerId, now);
-    return true;
   }
 
   // ─── 6장 단계 전환 (관리자 버튼과 타이머) ───
@@ -349,7 +346,7 @@ export class GameRoom {
     this.state = GameRoom.emptyRoom(this.state.questions);
     this.ranking = null;
     this.questionStartedAt = null;
-    this.lastLaughAt.clear();
+    this.lastEmoteAt.clear();
   }
 
   revealPayload(): RevealPayload | null {

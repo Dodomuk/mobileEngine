@@ -5,6 +5,8 @@ import type {
   AdminAuthAck,
   AdminAuthPayload,
   AnswerTally,
+  EmoteEvent,
+  EmotePayload,
   ErrorPayload,
   JoinAck,
   JoinPayload,
@@ -23,7 +25,7 @@ export const EV = {
   PLAYER_RESUME: 'player:resume',
   PLAYER_MOVE: 'player:move',
   PLAYER_ACTION: 'player:action',
-  PLAYER_LAUGH: 'player:laugh',
+  PLAYER_EMOTE: 'player:emote',
   ADMIN_AUTH: 'admin:auth',
   ADMIN_START: 'admin:start',
   ADMIN_REVEAL_NOW: 'admin:revealNow',
@@ -50,7 +52,7 @@ export interface ServerToClientEvents {
   'admin:question': (question: Question | null) => void;
   'admin:tally': (tally: AnswerTally) => void;
   'round:reveal': (payload: RevealPayload) => void;
-  'player:laugh': (payload: { playerId: string }) => void;
+  'player:emote': (payload: EmoteEvent) => void;
   'game:mainStart': () => void;
   'game:result': (ranking: RankingEntry[]) => void;
   'room:reset': () => void;
@@ -62,7 +64,7 @@ export interface ClientToServerEvents {
   'player:resume': (payload: ResumePayload, ack: (res: JoinAck) => void) => void;
   'player:move': (payload: MovePayload) => void;
   'player:action': (payload: ActionPayload, ack: (res: ActionAck) => void) => void;
-  'player:laugh': () => void;
+  'player:emote': (payload: EmotePayload) => void;
   'admin:auth': (payload: AdminAuthPayload, ack: (res: AdminAuthAck) => void) => void;
   'admin:start': () => void;
   'admin:revealNow': () => void;

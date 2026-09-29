@@ -1,5 +1,5 @@
 import { ADMIN_ID, MAIN_COUNT, PRACTICE_COUNT } from '../../shared/constants.ts';
-import type { AnswerTally, Question, RoundAction, StateSnapshot } from '../../shared/types.ts';
+import type { AnswerTally, EmoteType, Question, RoundAction, StateSnapshot } from '../../shared/types.ts';
 import { syncClock } from './clock.ts';
 import { FieldView } from './field.ts';
 import { socket } from './socket.ts';
@@ -144,7 +144,7 @@ export function startAdminApp(app: HTMLElement, reconnectOverlay: HTMLElement): 
     view?.setQuestion(question);
   });
   socket.on('admin:tally', (tally) => view?.setTally(tally));
-  socket.on('player:laugh', ({ playerId }) => view?.showLaugh(playerId));
+  socket.on('player:emote', ({ playerId, emote }) => view?.showEmote(playerId, emote));
   socket.on('game:mainStart', () => showFullscreenNotice('본 게임 시작', '모든 플레이어의 점수가 0점으로 초기화되었습니다'));
   socket.on('error', (error) => {
     if (error.code === 'ADMIN_REPLACED') {
@@ -164,7 +164,7 @@ interface AdminView {
   setQuestion(question: Question | null): void;
   setTally(tally: AnswerTally): void;
   applyPositions(positions: Parameters<FieldView['applyPositions']>[0]): void;
-  showLaugh(playerId: string): void;
+  showEmote(playerId: string, emote: EmoteType): void;
   destroy(): void;
 }
 
@@ -306,7 +306,7 @@ function renderAdminView(app: HTMLElement): AdminView {
         });
       const table = document.createElement('table');
       table.className = 'admin-table';
-      table.innerHTML = '<thead><tr><th>닉네임</th><th>답</th><th>행동</th><th>변동</th><th>총점</th></tr></thead><tbody></tbody>';
+      table.innerHTML = '<thead><tr><th>닉네임</th><th>답</th><th>찍기</th><th>변동</th><th>총점</th></tr></thead><tbody></tbody>';
       table.querySelector('tbody')!.append(...rows);
       scoreboard.replaceChildren(table);
     } else if (s.phase === 'LOBBY') {
@@ -338,8 +338,8 @@ function renderAdminView(app: HTMLElement): AdminView {
     applyPositions(positions) {
       field.applyPositions(positions);
     },
-    showLaugh(playerId) {
-      field.showLaugh(playerId);
+    showEmote(playerId, emote) {
+      field.showEmote(playerId, emote);
     },
     destroy() {
       timer.destroy();
@@ -348,11 +348,10 @@ function renderAdminView(app: HTMLElement): AdminView {
   };
 }
 
-// 정답 공개 점수표의 행동 칸: 「👍 영희 +2」
+// 정답 공개 점수표의 찍기 칸: 「⭕ 영희 +3」
 function describeAction(action: RoundAction, delta: number, s: StateSnapshot): string {
-  if (action.type === 'LAUGH') return '😆';
   if (action.type === 'NONE') return '';
   const target = s.players.find((p) => p.id === action.targetId)?.nickname ?? '?';
-  const icon = action.type === 'BET_CORRECT' ? '👍' : '👎';
+  const icon = action.type === 'BET_CORRECT' ? '⭕' : '❌';
   return `${icon} ${target} ${delta > 0 ? '+' : ''}${delta}`;
 }

@@ -10,7 +10,7 @@ export function createAvatar(key: AnyCharacter, size: number): HTMLElement {
   const canvas = document.createElement('canvas');
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
   canvas.width = canvas.height = Math.round(size * dpr);
-  canvas.style.width = canvas.style.height = `${size}px`;
+  canvas.style.width = canvas.style.height = '100%';
   const ctx = canvas.getContext('2d')!;
   ctx.scale(dpr, dpr);
   drawCharacterArt(ctx, key, size / 2, size * 0.97, size * 0.92);

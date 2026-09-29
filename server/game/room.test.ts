@@ -368,11 +368,11 @@ describe('추가 행동 (7장)', () => {
     expect(room.setAction(a.id, 'NONE', undefined, 120_000).ok).toBe(false); // 타이머 종료 후
   });
 
-  it('문제당 행동은 1개: 찍기 뒤 웃기를 고르면 찍기는 취소된다', () => {
+  it('초기화(NONE)를 누르면 찍기가 취소된다', () => {
     const { room, a, b } = setup();
     room.setAction(a.id, 'BET_CORRECT', b.id, 1000);
-    room.setAction(a.id, 'LAUGH', undefined, 2000);
-    expect(room.actionOf(a.id)).toEqual({ type: 'LAUGH' });
+    room.setAction(a.id, 'NONE', b.id, 2000);
+    expect(room.actionOf(a.id)).toEqual({ type: 'NONE' });
   });
 
   it('자기 자신·없는 플레이어·관리자는 찍을 수 없다', () => {
@@ -385,17 +385,23 @@ describe('추가 행동 (7장)', () => {
     expect(room.setAction(a.id, 'JUMP', undefined, 1000).ok).toBe(false);
   });
 
-  it('웃기는 1초 쿨다운, 정답 공개 때는 말풍선만 띄우고 행동은 그대로', () => {
-    const { room, a, b } = setup();
-    expect(room.setAction(a.id, 'LAUGH', undefined, 1000)).toMatchObject({ ok: true, laugh: true });
-    expect(room.setAction(a.id, 'LAUGH', undefined, 1500)).toMatchObject({ ok: true, laugh: false });
-    expect(room.setAction(a.id, 'LAUGH', undefined, 2100)).toMatchObject({ ok: true, laugh: true });
-    room.setAction(b.id, 'BET_CORRECT', a.id, 3000);
-    expect(room.laugh(b.id, 3000).ok).toBe(false); // QUESTION에서는 player:laugh 불가
+  it('이모티콘은 찍기와 별개: 1초 쿨다운, 대기실·문제·정답 공개에서 가능, 결과 발표 뒤 불가', () => {
+    const room = new GameRoom(questions);
+    const a = joinOk(room, '철수');
+    const b = joinOk(room, '영희');
+    expect(room.emote(a.id, 'LAUGH', 0).ok).toBe(true); // LOBBY
+    room.start(0);
+    room.setAction(b.id, 'BET_CORRECT', a.id, 1000);
+    expect(room.emote(b.id, 'CRY', 1000).ok).toBe(true);
+    const tooSoon = room.emote(b.id, 'ANGRY', 1500);
+    expect(tooSoon.ok).toBe(false);
+    if (!tooSoon.ok) expect(tooSoon.error.code).toBe('COOLDOWN');
+    expect(room.emote(b.id, 'THUMBS_UP', 2100).ok).toBe(true);
+    expect(room.actionOf(b.id)).toEqual({ type: 'BET_CORRECT', targetId: a.id }); // 찍기 유지
     room.reveal();
-    expect(room.laugh(b.id, 4000).ok).toBe(true);
-    expect(room.laugh(b.id, 4500).ok).toBe(false);
-    expect(room.actionOf(b.id)).toEqual({ type: 'BET_CORRECT', targetId: a.id });
+    expect(room.emote(b.id, 'THUMBS_DOWN', 4000).ok).toBe(true);
+    expect(room.emote(b.id, 'DANCE', 6000).ok).toBe(false);
+    expect(room.setAction(a.id, 'LAUGH', undefined, 1000).ok).toBe(false); // 웃기는 더 이상 찍기 슬롯이 아님
   });
 
   it('판정에 찍기 점수가 반영되고, 다음 문제에서는 무행동으로 초기화된다', () => {
@@ -405,8 +411,8 @@ describe('추가 행동 (7장)', () => {
     room.setAction(b.id, 'BET_CORRECT', a.id, 1000);
     room.setAction(a.id, 'BET_CORRECT', b.id, 1000);
     room.reveal();
-    expect(a.score).toBe(10 - 2);
-    expect(b.score).toBe(2);
+    expect(a.score).toBe(10 - 3);
+    expect(b.score).toBe(3);
     expect(room.revealPayload()!.perPlayer[b.id].action).toEqual({ type: 'BET_CORRECT', targetId: a.id });
     room.next(2000);
     expect(room.actionOf(a.id)).toEqual({ type: 'NONE' });

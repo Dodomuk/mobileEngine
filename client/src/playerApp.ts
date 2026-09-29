@@ -74,8 +74,8 @@ export function startPlayerApp(app: HTMLElement, reconnectOverlay: HTMLElement):
     game?.applyPositions(positions);
   });
 
-  socket.on('player:laugh', ({ playerId }) => {
-    game?.showLaugh(playerId);
+  socket.on('player:emote', ({ playerId, emote }) => {
+    game?.showEmote(playerId, emote);
   });
 
   // 3장: 연습이 끝나고 본 게임이 시작되면 3초간 전면 안내

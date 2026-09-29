@@ -4,15 +4,16 @@ import {
   ADMIN_NICKNAME,
   ANSWER_CIRCLES,
   FIELD_HEIGHT,
-  LAUGH_BUBBLE_MS,
+  EMOTE_BUBBLE_MS,
+  EMOTES,
   FIELD_WIDTH,
   TICK_MS,
-  TILE_SIZE,
   characterImageUrl,
   circleAt,
 } from '../../shared/constants.ts';
 import type {
   Choice,
+  EmoteType,
   PlayerPosition,
   PublicQuestion,
   RevealPayload,
@@ -20,9 +21,9 @@ import type {
   StateSnapshot,
 } from '../../shared/types.ts';
 import { drawCharacterArt, type AnyCharacter } from './characters.ts';
+import { drawScenery, drawWater } from './scenery.ts';
 
 const CHARACTER_SIZE = 76;
-const TILE_COLORS = ['#7cc576', '#6db767'];
 // 스냅샷 간격보다 조금 길게 보간해 네트워크 지터에도 끊기지 않게 한다
 const LERP_MS = TICK_MS + 30;
 const MOVE_SEND_INTERVAL_MS = 100;
@@ -117,7 +118,8 @@ export class FieldView {
   private reveal: RevealState | null = null;
   private inputEnabled = true;
   private choices: PublicQuestion['choices'] | null = null;
-  private laughs = new Map<string, number>(); // 플레이어 id → 말풍선 시작 시각
+  private emotes = new Map<string, { emote: EmoteType; start: number }>(); // 플레이어 id → 말풍선
+  private background = document.createElement('canvas'); // 광장·자연 배경(해상도가 바뀔 때만 다시 그림)
 
   constructor(private host: HTMLElement, private options: FieldOptions) {
     this.canvas.className = 'field-canvas';
@@ -178,9 +180,9 @@ export class FieldView {
     this.setReveal(snapshot.phase === 'REVEAL' ? snapshot.lastRound : null);
   }
 
-  // 7장: 웃는 표정 말풍선 3초
-  showLaugh(playerId: string): void {
-    this.laughs.set(playerId, performance.now());
+  // 7장: 이모티콘 말풍선 3초
+  showEmote(playerId: string, emote: EmoteType): void {
+    this.emotes.set(playerId, { emote, start: performance.now() });
   }
 
   applyPositions(positions: PlayerPosition[]): void {
@@ -242,6 +244,11 @@ export class FieldView {
     Object.assign(this.canvas.style, { width: `${cssW}px`, height: `${cssH}px`, top: `${top}px`, left: `${left}px` });
     this.canvas.width = Math.round(cssW * this.dpr);
     this.canvas.height = Math.round(cssH * this.dpr);
+    this.background.width = this.canvas.width;
+    this.background.height = this.canvas.height;
+    const bg = this.background.getContext('2d')!;
+    bg.setTransform(this.canvas.width / FIELD_WIDTH, 0, 0, this.canvas.height / FIELD_HEIGHT, 0, 0);
+    drawScenery(bg);
     // 오버레이가 필드에 맞춰 자리 잡도록 필드 위치를 CSS 변수로 알려 준다
     this.host.style.setProperty('--field-top', `${top}px`);
     this.host.style.setProperty('--field-left', `${left}px`);
@@ -312,7 +319,8 @@ export class FieldView {
       this.options.onChoiceChange?.(choice);
     }
 
-    this.drawTiles(ctx);
+    ctx.drawImage(this.background, 0, 0, FIELD_WIDTH, FIELD_HEIGHT);
+    drawWater(ctx, now);
     this.drawCircles(ctx, choice);
     this.drawChoiceLabels(ctx);
     this.drawTouchMarker(ctx, now);
@@ -322,24 +330,15 @@ export class FieldView {
       this.drawBets(ctx, at, now);
       for (const d of drawn) this.drawPopup(ctx, d.sprite.entity.id, d.x, d.y, now);
     }
-    for (const [id, start] of this.laughs) {
+    for (const [id, { emote, start }] of this.emotes) {
       const d = at.get(id);
-      if (!d || now - start > LAUGH_BUBBLE_MS) {
-        this.laughs.delete(id);
+      if (!d || now - start > EMOTE_BUBBLE_MS) {
+        this.emotes.delete(id);
         continue;
       }
-      this.drawLaughBubble(ctx, d.x, d.y, now - start);
+      this.drawEmoteBubble(ctx, d.x, d.y, now - start, emote);
     }
   };
-
-  private drawTiles(ctx: CanvasRenderingContext2D): void {
-    for (let row = 0; row < FIELD_HEIGHT / TILE_SIZE; row++) {
-      for (let col = 0; col < FIELD_WIDTH / TILE_SIZE; col++) {
-        ctx.fillStyle = TILE_COLORS[(row + col) % 2];
-        ctx.fillRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-      }
-    }
-  }
 
   private drawCircles(ctx: CanvasRenderingContext2D, myChoice: Choice | null): void {
     const correct = this.reveal?.correct;
@@ -395,7 +394,7 @@ export class FieldView {
       const lines = wrapText(ctx, this.choices[choice], CHOICE_MAX_WIDTH, 3);
       const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 36;
       const h = lines.length * CHOICE_LINE + 18;
-      const bottom = c.y - c.r - 12;
+      const bottom = c.y - c.r + 8; // 원 윗부분에 살짝 걸치게 해 상단 아이콘과 겹치지 않도록
       const isCorrect = choice === correct;
       ctx.globalAlpha = correct !== undefined && !isCorrect ? 0.45 : 1;
       ctx.beginPath();
@@ -498,67 +497,146 @@ export class FieldView {
     ctx.fillText(text, x, y + 1);
   }
 
-  // 7장: 정답 공개 때 누가 누구를 찍었는지 화살표로 보여 준다(맞히면 초록, 틀리면 빨강)
+  // 7장: 정답 공개 때 누가 누구를 찍었는지 입체 화살표로 보여 준다.
+  // 성공은 파랑, 실패는 빨강, 무효는 회색. 내가 쏜 화살표는 더 굵고 빛나게, 나머지는 살짝 흐리게.
   private drawBets(
     ctx: CanvasRenderingContext2D,
     at: Map<string, { x: number; y: number }>,
     now: number,
   ): void {
     const progress = Math.min(1, (now - this.reveal!.shownAt) / 600);
-    for (const bet of this.reveal!.bets) {
+    const ease = 1 - (1 - progress) ** 3;
+    // 내 화살표가 맨 위에 오도록 마지막에 그린다
+    const bets = [...this.reveal!.bets].sort((a, b) => Number(a.from === this.myId) - Number(b.from === this.myId));
+    for (const bet of bets) {
       const from = at.get(bet.from);
       const to = at.get(bet.to);
       if (!from || !to) continue;
-      const color = bet.delta > 0 ? '#2fbf71' : bet.delta < 0 ? '#f04848' : '#9aa5a0';
+      const mine = bet.from === this.myId;
+      const palette = bet.delta > 0
+        ? { base: '#1c7ed6', dark: '#0b4f9c', light: '#a5d8ff' }
+        : bet.delta < 0
+          ? { base: '#e03131', dark: '#8f1414', light: '#ffc9c9' }
+          : { base: '#868e96', dark: '#495057', light: '#e9ecef' };
+      const width = mine ? 15 : 10;
+
       const x1 = from.x;
-      const y1 = from.y - CHARACTER_SIZE * 0.5;
-      const x2 = from.x + (to.x - from.x) * progress;
-      const y2 = from.y - CHARACTER_SIZE * 0.5 + (to.y - from.y) * progress;
-      // 위로 휘는 곡선
-      const mx = (x1 + x2) / 2;
-      const my = Math.min(y1, y2) - 60 - Math.abs(x2 - x1) * 0.12;
+      const y1 = from.y - CHARACTER_SIZE * 0.55;
+      const tx = to.x;
+      const ty = to.y - CHARACTER_SIZE * 0.55;
+      const cx = (x1 + tx) / 2;
+      const cy = Math.min(y1, ty) - 70 - Math.abs(tx - x1) * 0.15;
+      // 끝점을 progress만큼 곡선 위에서 따라가게 한다
+      const q = (t: number) => ({
+        x: (1 - t) ** 2 * x1 + 2 * (1 - t) * t * cx + t * t * tx,
+        y: (1 - t) ** 2 * y1 + 2 * (1 - t) * t * cy + t * t * ty,
+      });
+      const end = q(ease);
+      const before = q(Math.max(0, ease - 0.04));
+      const angle = Math.atan2(end.y - before.y, end.x - before.x);
+      const headLen = width * 2.4;
+      // 화살촉 뿌리까지만 몸통을 그린다
+      const shaftEnd = { x: end.x - Math.cos(angle) * headLen * 0.7, y: end.y - Math.sin(angle) * headLen * 0.7 };
+      const mid = q(ease / 2);
+      const ctrl = { x: 2 * mid.x - (x1 + shaftEnd.x) / 2, y: 2 * mid.y - (y1 + shaftEnd.y) / 2 };
+
+      const shaft = () => {
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.quadraticCurveTo(ctrl.x, ctrl.y, shaftEnd.x, shaftEnd.y);
+      };
+      const head = () => {
+        ctx.beginPath();
+        ctx.moveTo(end.x, end.y);
+        ctx.lineTo(end.x - headLen * Math.cos(angle - 0.5), end.y - headLen * Math.sin(angle - 0.5));
+        ctx.lineTo(end.x - headLen * 0.7 * Math.cos(angle), end.y - headLen * 0.7 * Math.sin(angle));
+        ctx.lineTo(end.x - headLen * Math.cos(angle + 0.5), end.y - headLen * Math.sin(angle + 0.5));
+        ctx.closePath();
+      };
 
       ctx.save();
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.quadraticCurveTo(mx, my, x2, y2);
-      ctx.lineWidth = 6;
-      ctx.strokeStyle = color;
-      ctx.setLineDash([14, 10]);
+      ctx.globalAlpha = mine ? 1 : 0.82;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      // 1) 바닥 그림자
+      ctx.save();
+      ctx.translate(4, 9);
+      shaft();
+      ctx.lineWidth = width + 4;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.28)';
       ctx.stroke();
-      ctx.setLineDash([]);
-      if (progress === 1) {
-        const angle = Math.atan2(y2 - my, x2 - mx);
-        ctx.beginPath();
-        ctx.moveTo(x2, y2);
-        ctx.lineTo(x2 - 20 * Math.cos(angle - 0.45), y2 - 20 * Math.sin(angle - 0.45));
-        ctx.lineTo(x2 - 20 * Math.cos(angle + 0.45), y2 - 20 * Math.sin(angle + 0.45));
-        ctx.closePath();
-        ctx.fillStyle = color;
-        ctx.fill();
+      head();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+      ctx.fill();
+      ctx.restore();
+      // 2) 흰 테두리 (내 화살표는 색 빛번짐)
+      if (mine) {
+        ctx.shadowColor = palette.base;
+        ctx.shadowBlur = 18 + Math.sin(now / 160) * 6;
+      }
+      shaft();
+      ctx.lineWidth = width + 7;
+      ctx.strokeStyle = '#ffffff';
+      ctx.stroke();
+      head();
+      ctx.lineWidth = 7;
+      ctx.stroke();
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      // 3) 몸통: 어두운 색 위에 기본 색, 위쪽에 밝은 줄을 얹어 원통처럼
+      shaft();
+      ctx.lineWidth = width;
+      ctx.strokeStyle = palette.dark;
+      ctx.stroke();
+      shaft();
+      ctx.lineWidth = width * 0.7;
+      ctx.strokeStyle = palette.base;
+      ctx.stroke();
+      ctx.save();
+      ctx.translate(0, -width * 0.22);
+      shaft();
+      ctx.lineWidth = width * 0.22;
+      ctx.strokeStyle = palette.light;
+      ctx.stroke();
+      ctx.restore();
+      head();
+      const hg = ctx.createLinearGradient(end.x, end.y - headLen, end.x, end.y + headLen);
+      hg.addColorStop(0, palette.light);
+      hg.addColorStop(0.45, palette.base);
+      hg.addColorStop(1, palette.dark);
+      ctx.fillStyle = hg;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = palette.dark;
+      ctx.stroke();
 
-        const label = `${bet.action.type === 'BET_CORRECT' ? '👍' : '👎'} ${bet.delta > 0 ? '+' : ''}${bet.delta}`;
-        ctx.font = '800 24px system-ui, sans-serif';
+      if (progress === 1) {
+        const label = `${bet.action.type === 'BET_CORRECT' ? '⭕' : '❌'} ${bet.delta > 0 ? '+' : ''}${bet.delta}${mine ? ' 나' : ''}`;
+        ctx.font = `900 ${mine ? 30 : 24}px system-ui, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const lx = 0.25 * x1 + 0.5 * mx + 0.25 * x2;
-        const ly = 0.25 * y1 + 0.5 * my + 0.25 * y2;
-        const w = ctx.measureText(label).width + 18;
+        const top = q(0.5);
+        const w = ctx.measureText(label).width + 22;
+        const h = mine ? 40 : 32;
         ctx.beginPath();
-        ctx.roundRect(lx - w / 2, ly - 16, w, 32, 16);
-        ctx.fillStyle = color;
+        ctx.roundRect(top.x - w / 2, top.y - h / 2 - 4, w, h, h / 2);
+        ctx.fillStyle = palette.base;
         ctx.fill();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#fff';
+        ctx.stroke();
         ctx.fillStyle = '#fff';
-        ctx.fillText(label, lx, ly + 1);
+        ctx.fillText(label, top.x, top.y - 3);
       }
       ctx.restore();
     }
   }
 
-  // 7장: 내 캐릭터 위에 웃는 표정 말풍선
-  private drawLaughBubble(ctx: CanvasRenderingContext2D, x: number, y: number, age: number): void {
+  // 7장: 캐릭터 오른쪽 위에 이모티콘 말풍선
+  private drawEmoteBubble(ctx: CanvasRenderingContext2D, x: number, y: number, age: number, emote: EmoteType): void {
     const pop = Math.min(1, age / 150);
-    const fade = age > LAUGH_BUBBLE_MS - 300 ? (LAUGH_BUBBLE_MS - age) / 300 : 1;
+    const fade = age > EMOTE_BUBBLE_MS - 300 ? (EMOTE_BUBBLE_MS - age) / 300 : 1;
     // 머리 위 점수 팝업과 겹치지 않도록 오른쪽 위에 띄운다
     const cx = x + 78;
     const cy = y - CHARACTER_SIZE * 0.75;
@@ -566,37 +644,22 @@ export class FieldView {
     ctx.globalAlpha = Math.max(0, fade);
     ctx.translate(cx, cy);
     ctx.scale(pop, pop);
-    // 말풍선
     ctx.beginPath();
-    ctx.ellipse(0, 0, 40, 32, 0, 0, Math.PI * 2);
-    ctx.moveTo(-18, 24);
-    ctx.lineTo(-30, 42);
-    ctx.lineTo(-4, 30);
+    ctx.ellipse(0, 0, 40, 34, 0, 0, Math.PI * 2);
+    ctx.moveTo(-18, 26);
+    ctx.lineTo(-32, 44);
+    ctx.lineTo(-4, 32);
     ctx.fillStyle = '#fff';
     ctx.fill();
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'rgba(40, 30, 20, 0.8)';
     ctx.stroke();
-    // 웃는 얼굴
-    ctx.beginPath();
-    ctx.arc(0, 0, 22, 0, Math.PI * 2);
-    ctx.fillStyle = '#ffd43b';
-    ctx.fill();
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
-    const wobble = Math.sin(age / 90) * 1.5;
-    ctx.beginPath();
-    ctx.moveTo(-12, -4 + wobble); ctx.quadraticCurveTo(-7, -11 + wobble, -2, -4 + wobble);
-    ctx.moveTo(2, -4 + wobble); ctx.quadraticCurveTo(7, -11 + wobble, 12, -4 + wobble);
-    ctx.lineWidth = 2.8;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(-11, 3);
-    ctx.quadraticCurveTo(0, 18, 11, 3);
-    ctx.closePath();
-    ctx.fillStyle = '#c92a2a';
-    ctx.fill();
-    ctx.stroke();
+    const wobble = Math.sin(age / 90) * 0.08;
+    ctx.rotate(wobble);
+    ctx.font = '44px "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(EMOTES.find((e) => e.type === emote)?.emoji ?? '🙂', 0, 3);
     ctx.restore();
   }
 
