@@ -1,0 +1,14 @@
+# Render Blueprint: 무료 플랜 Web Service 1개, 싱가포르 리전 (기획서 2장)
+services:
+  - type: web
+    name: abc-quiz
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: ADMIN_PIN
+        sync: false # Render 대시보드에서 직접 입력
