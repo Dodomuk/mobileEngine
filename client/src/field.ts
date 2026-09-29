@@ -1,11 +1,10 @@
 import {
   ADMIN_CHARACTER,
-  ADMIN_COLOR,
   ADMIN_ID,
   ADMIN_NICKNAME,
   ANSWER_CIRCLES,
-  CHARACTERS,
   FIELD_HEIGHT,
+  LAUGH_BUBBLE_MS,
   FIELD_WIDTH,
   TICK_MS,
   TILE_SIZE,
@@ -13,13 +12,14 @@ import {
   circleAt,
 } from '../../shared/constants.ts';
 import type {
-  AdminCharacterKey,
-  CharacterKey,
   Choice,
   PlayerPosition,
+  PublicQuestion,
   RevealPayload,
+  RoundAction,
   StateSnapshot,
 } from '../../shared/types.ts';
+import { drawCharacterArt, type AnyCharacter } from './characters.ts';
 
 const CHARACTER_SIZE = 76;
 const TILE_COLORS = ['#7cc576', '#6db767'];
@@ -27,8 +27,6 @@ const TILE_COLORS = ['#7cc576', '#6db767'];
 const LERP_MS = TICK_MS + 30;
 const MOVE_SEND_INTERVAL_MS = 100;
 const POPUP_RISE_MS = 700;
-
-type AnyCharacter = CharacterKey | AdminCharacterKey;
 
 interface Entity {
   id: string;
@@ -50,8 +48,13 @@ interface RevealState {
   questionId: string;
   correct: Choice;
   deltas: Map<string, number>;
+  bets: { from: string; to: string; action: RoundAction; delta: number }[];
   shownAt: number;
 }
+
+const CHOICE_FONT = '700 30px system-ui, -apple-system, sans-serif';
+const CHOICE_LINE = 36;
+const CHOICE_MAX_WIDTH = 390;
 
 // 캐릭터 이미지: 없으면 색 원 + 이름 첫 글자로 그린다(4장 플레이스홀더)
 const images = new Map<AnyCharacter, HTMLImageElement | null>();
@@ -65,9 +68,29 @@ function characterImage(key: AnyCharacter): HTMLImageElement | null {
   return images.get(key) ?? null;
 }
 
-function placeholderInfo(key: AnyCharacter): { name: string; color: string } {
-  if (key === ADMIN_CHARACTER) return { name: ADMIN_NICKNAME, color: ADMIN_COLOR };
-  return CHARACTERS.find((c) => c.key === key) ?? { name: '?', color: '#999' };
+// 선택지 글자를 최대 폭에 맞춰 줄바꿈한다(한글은 글자 단위, 공백이 있으면 단어 단위)
+function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const ch of [...text]) {
+    const next = line + ch;
+    if (ctx.measureText(next).width > maxWidth && line) {
+      const cut = line.lastIndexOf(' ');
+      if (cut > 0 && ch !== ' ') {
+        lines.push(line.slice(0, cut));
+        line = line.slice(cut + 1) + ch;
+      } else {
+        lines.push(line);
+        line = ch === ' ' ? '' : ch;
+      }
+      if (lines.length === maxLines) break;
+    } else {
+      line = next;
+    }
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+  else if (lines.length === maxLines && line) lines[maxLines - 1] = lines[maxLines - 1].replace(/.$/, '…');
+  return lines;
 }
 
 export interface FieldOptions {
@@ -93,6 +116,8 @@ export class FieldView {
   private currentChoice: Choice | null = null;
   private reveal: RevealState | null = null;
   private inputEnabled = true;
+  private choices: PublicQuestion['choices'] | null = null;
+  private laughs = new Map<string, number>(); // 플레이어 id → 말풍선 시작 시각
 
   constructor(private host: HTMLElement, private options: FieldOptions) {
     this.canvas.className = 'field-canvas';
@@ -149,7 +174,13 @@ export class FieldView {
 
     // 5장: 판정 뒤(REVEAL·RESULT)에는 이동 입력을 보내지 않는다
     this.inputEnabled = snapshot.phase === 'LOBBY' || snapshot.phase === 'QUESTION';
+    this.choices = snapshot.question?.choices ?? null;
     this.setReveal(snapshot.phase === 'REVEAL' ? snapshot.lastRound : null);
+  }
+
+  // 7장: 웃는 표정 말풍선 3초
+  showLaugh(playerId: string): void {
+    this.laughs.set(playerId, performance.now());
   }
 
   applyPositions(positions: PlayerPosition[]): void {
@@ -166,10 +197,14 @@ export class FieldView {
       return;
     }
     if (this.reveal?.questionId === round.questionId) return;
+    const bets = Object.entries(round.perPlayer)
+      .filter(([, r]) => (r.action.type === 'BET_CORRECT' || r.action.type === 'BET_WRONG') && r.action.targetId)
+      .map(([id, r]) => ({ from: id, to: r.action.targetId!, action: r.action, delta: r.actionDelta }));
     this.reveal = {
       questionId: round.questionId,
       correct: round.correct,
       deltas: new Map(Object.entries(round.perPlayer).map(([id, r]) => [id, r.total])),
+      bets,
       shownAt: performance.now(),
     };
   }
@@ -209,7 +244,9 @@ export class FieldView {
     this.canvas.height = Math.round(cssH * this.dpr);
     // 오버레이가 필드에 맞춰 자리 잡도록 필드 위치를 CSS 변수로 알려 준다
     this.host.style.setProperty('--field-top', `${top}px`);
+    this.host.style.setProperty('--field-left', `${left}px`);
     this.host.style.setProperty('--field-width', `${cssW}px`);
+    this.host.style.setProperty('--field-height', `${cssH}px`);
     this.host.style.setProperty('--field-scale', String(this.scale));
   };
 
@@ -277,9 +314,22 @@ export class FieldView {
 
     this.drawTiles(ctx);
     this.drawCircles(ctx, choice);
+    this.drawChoiceLabels(ctx);
     this.drawTouchMarker(ctx, now);
     for (const d of drawn) this.drawCharacter(ctx, d.sprite, d.x, d.y, d.moving, now);
-    if (this.reveal) for (const d of drawn) this.drawPopup(ctx, d.sprite.entity.id, d.x, d.y, now);
+    const at = new Map(drawn.map((d) => [d.sprite.entity.id, d]));
+    if (this.reveal) {
+      this.drawBets(ctx, at, now);
+      for (const d of drawn) this.drawPopup(ctx, d.sprite.entity.id, d.x, d.y, now);
+    }
+    for (const [id, start] of this.laughs) {
+      const d = at.get(id);
+      if (!d || now - start > LAUGH_BUBBLE_MS) {
+        this.laughs.delete(id);
+        continue;
+      }
+      this.drawLaughBubble(ctx, d.x, d.y, now - start);
+    }
   };
 
   private drawTiles(ctx: CanvasRenderingContext2D): void {
@@ -321,15 +371,44 @@ export class FieldView {
       ctx.fillText(choice, c.x, c.y + 8);
 
       if (isCorrect) {
-        ctx.font = '900 36px system-ui, sans-serif';
+        ctx.font = '900 34px system-ui, sans-serif';
         ctx.fillStyle = '#ffd23f';
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
         ctx.lineWidth = 6;
-        ctx.strokeText('정답', c.x, c.y - c.r - 30);
-        ctx.fillText('정답', c.x, c.y - c.r - 30);
+        ctx.strokeText('정답', c.x, c.y + c.r - 34);
+        ctx.fillText('정답', c.x, c.y + c.r - 34);
       }
       ctx.restore();
     }
+  }
+
+  // 선택지 글자를 각 원 바로 위에 보여 준다(문제 텍스트는 없음)
+  private drawChoiceLabels(ctx: CanvasRenderingContext2D): void {
+    if (!this.choices) return;
+    const correct = this.reveal?.correct;
+    ctx.save();
+    ctx.font = CHOICE_FONT;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (const choice of ['A', 'B', 'C'] as const) {
+      const c = ANSWER_CIRCLES[choice];
+      const lines = wrapText(ctx, this.choices[choice], CHOICE_MAX_WIDTH, 3);
+      const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 36;
+      const h = lines.length * CHOICE_LINE + 18;
+      const bottom = c.y - c.r - 12;
+      const isCorrect = choice === correct;
+      ctx.globalAlpha = correct !== undefined && !isCorrect ? 0.45 : 1;
+      ctx.beginPath();
+      ctx.roundRect(c.x - w / 2, bottom - h, w, h, 16);
+      ctx.fillStyle = isCorrect ? '#ffe066' : 'rgba(255, 255, 255, 0.94)';
+      ctx.fill();
+      ctx.lineWidth = isCorrect ? 5 : 3;
+      ctx.strokeStyle = isCorrect ? '#f08c00' : c.color.replace(/[\d.]+\)$/, '0.9)');
+      ctx.stroke();
+      ctx.fillStyle = '#1f2a24';
+      lines.forEach((line, i) => ctx.fillText(line, c.x, bottom - h + 9 + CHOICE_LINE * (i + 0.5) + 1));
+    }
+    ctx.restore();
   }
 
   private drawTouchMarker(ctx: CanvasRenderingContext2D, now: number): void {
@@ -378,19 +457,7 @@ export class FieldView {
       ctx.drawImage(img, -size / 2, top, size, size);
       ctx.restore();
     } else {
-      const info = placeholderInfo(entity.character);
-      ctx.beginPath();
-      ctx.arc(x, top + size / 2, size / 2 - 4, 0, Math.PI * 2);
-      ctx.fillStyle = info.color;
-      ctx.fill();
-      ctx.lineWidth = 4;
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-      ctx.stroke();
-      ctx.font = '800 34px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#fff';
-      ctx.fillText(info.name.slice(0, 1), x, top + size / 2 + 2);
+      drawCharacterArt(ctx, entity.character, x, top + size, size, { t: now, facing: sprite.facing, moving });
     }
     if (entity.isAdmin) this.drawCrown(ctx, x, top - 4);
 
@@ -429,6 +496,108 @@ export class FieldView {
     ctx.fill();
     ctx.fillStyle = isMe ? '#2b2100' : '#fff';
     ctx.fillText(text, x, y + 1);
+  }
+
+  // 7장: 정답 공개 때 누가 누구를 찍었는지 화살표로 보여 준다(맞히면 초록, 틀리면 빨강)
+  private drawBets(
+    ctx: CanvasRenderingContext2D,
+    at: Map<string, { x: number; y: number }>,
+    now: number,
+  ): void {
+    const progress = Math.min(1, (now - this.reveal!.shownAt) / 600);
+    for (const bet of this.reveal!.bets) {
+      const from = at.get(bet.from);
+      const to = at.get(bet.to);
+      if (!from || !to) continue;
+      const color = bet.delta > 0 ? '#2fbf71' : bet.delta < 0 ? '#f04848' : '#9aa5a0';
+      const x1 = from.x;
+      const y1 = from.y - CHARACTER_SIZE * 0.5;
+      const x2 = from.x + (to.x - from.x) * progress;
+      const y2 = from.y - CHARACTER_SIZE * 0.5 + (to.y - from.y) * progress;
+      // 위로 휘는 곡선
+      const mx = (x1 + x2) / 2;
+      const my = Math.min(y1, y2) - 60 - Math.abs(x2 - x1) * 0.12;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.quadraticCurveTo(mx, my, x2, y2);
+      ctx.lineWidth = 6;
+      ctx.strokeStyle = color;
+      ctx.setLineDash([14, 10]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      if (progress === 1) {
+        const angle = Math.atan2(y2 - my, x2 - mx);
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - 20 * Math.cos(angle - 0.45), y2 - 20 * Math.sin(angle - 0.45));
+        ctx.lineTo(x2 - 20 * Math.cos(angle + 0.45), y2 - 20 * Math.sin(angle + 0.45));
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+
+        const label = `${bet.action.type === 'BET_CORRECT' ? '👍' : '👎'} ${bet.delta > 0 ? '+' : ''}${bet.delta}`;
+        ctx.font = '800 24px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const lx = 0.25 * x1 + 0.5 * mx + 0.25 * x2;
+        const ly = 0.25 * y1 + 0.5 * my + 0.25 * y2;
+        const w = ctx.measureText(label).width + 18;
+        ctx.beginPath();
+        ctx.roundRect(lx - w / 2, ly - 16, w, 32, 16);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.fillText(label, lx, ly + 1);
+      }
+      ctx.restore();
+    }
+  }
+
+  // 7장: 내 캐릭터 위에 웃는 표정 말풍선
+  private drawLaughBubble(ctx: CanvasRenderingContext2D, x: number, y: number, age: number): void {
+    const pop = Math.min(1, age / 150);
+    const fade = age > LAUGH_BUBBLE_MS - 300 ? (LAUGH_BUBBLE_MS - age) / 300 : 1;
+    // 머리 위 점수 팝업과 겹치지 않도록 오른쪽 위에 띄운다
+    const cx = x + 78;
+    const cy = y - CHARACTER_SIZE * 0.75;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, fade);
+    ctx.translate(cx, cy);
+    ctx.scale(pop, pop);
+    // 말풍선
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 40, 32, 0, 0, Math.PI * 2);
+    ctx.moveTo(-18, 24);
+    ctx.lineTo(-30, 42);
+    ctx.lineTo(-4, 30);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(40, 30, 20, 0.8)';
+    ctx.stroke();
+    // 웃는 얼굴
+    ctx.beginPath();
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd43b';
+    ctx.fill();
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    const wobble = Math.sin(age / 90) * 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-12, -4 + wobble); ctx.quadraticCurveTo(-7, -11 + wobble, -2, -4 + wobble);
+    ctx.moveTo(2, -4 + wobble); ctx.quadraticCurveTo(7, -11 + wobble, 12, -4 + wobble);
+    ctx.lineWidth = 2.8;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-11, 3);
+    ctx.quadraticCurveTo(0, 18, 11, 3);
+    ctx.closePath();
+    ctx.fillStyle = '#c92a2a';
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
   }
 
   // 3장: 정답 공개 때 캐릭터 머리 위에 점수 변동(+10, -2 등) 팝업

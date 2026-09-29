@@ -1,5 +1,7 @@
 // 10장 이벤트 이름. 이후 단계에서 쓰는 이벤트도 미리 모아 둔다.
 import type {
+  ActionAck,
+  ActionPayload,
   AdminAuthAck,
   AdminAuthPayload,
   AnswerTally,
@@ -48,6 +50,7 @@ export interface ServerToClientEvents {
   'admin:question': (question: Question | null) => void;
   'admin:tally': (tally: AnswerTally) => void;
   'round:reveal': (payload: RevealPayload) => void;
+  'player:laugh': (payload: { playerId: string }) => void;
   'game:mainStart': () => void;
   'game:result': (ranking: RankingEntry[]) => void;
   'room:reset': () => void;
@@ -58,6 +61,8 @@ export interface ClientToServerEvents {
   'player:join': (payload: JoinPayload, ack: (res: JoinAck) => void) => void;
   'player:resume': (payload: ResumePayload, ack: (res: JoinAck) => void) => void;
   'player:move': (payload: MovePayload) => void;
+  'player:action': (payload: ActionPayload, ack: (res: ActionAck) => void) => void;
+  'player:laugh': () => void;
   'admin:auth': (payload: AdminAuthPayload, ack: (res: AdminAuthAck) => void) => void;
   'admin:start': () => void;
   'admin:revealNow': () => void;

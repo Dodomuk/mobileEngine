@@ -93,6 +93,8 @@ export type ErrorCode =
   | 'NOT_ADMIN'
   | 'INVALID_PIN'
   | 'INVALID_PHASE'
+  | 'INVALID_TARGET'
+  | 'COOLDOWN'
   | 'ADMIN_REPLACED';
 
 export interface ErrorPayload { code: ErrorCode; message: string }
@@ -101,8 +103,12 @@ export interface JoinPayload { nickname: string; character: CharacterKey }
 export interface ResumePayload { sessionToken: string }
 
 export type JoinAck =
-  | { ok: true; playerId: string; sessionToken: string }
+  // action: 새로고침으로 복귀했을 때 이번 문제에서 이미 고른 행동
+  | { ok: true; playerId: string; sessionToken: string; action: RoundAction }
   | { ok: false; error: ErrorPayload };
+
+export interface ActionPayload { type: ActionType; targetId?: string }
+export type ActionAck = { ok: true; action: RoundAction } | { ok: false; error: ErrorPayload };
 
 export interface AdminAuthPayload { pin?: string; token?: string }
 export type AdminAuthAck =

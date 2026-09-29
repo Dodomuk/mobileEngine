@@ -41,6 +41,7 @@ export function startPlayerApp(app: HTMLElement, reconnectOverlay: HTMLElement):
     socket.emit('player:resume', { sessionToken: session.sessionToken }, (res) => {
       if (res.ok) {
         if (!game) showGame();
+        game?.setMyAction(res.action);
         return;
       }
       // 서버가 재시작됐거나 새 게임으로 초기화된 경우: 처음부터 다시 입장
@@ -71,6 +72,10 @@ export function startPlayerApp(app: HTMLElement, reconnectOverlay: HTMLElement):
 
   socket.on('state:positions', (positions) => {
     game?.applyPositions(positions);
+  });
+
+  socket.on('player:laugh', ({ playerId }) => {
+    game?.showLaugh(playerId);
   });
 
   // 3장: 연습이 끝나고 본 게임이 시작되면 3초간 전면 안내

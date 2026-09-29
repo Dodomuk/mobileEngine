@@ -4,9 +4,11 @@ import {
   ADMIN_ID,
   CHARACTERS,
   DEFAULT_TIME_LIMIT_SEC,
+  LAUGH_COOLDOWN_MS,
   FIELD_HEIGHT,
   FIELD_WIDTH,
   FIELD_MARGIN,
+  FIELD_MARGIN_BOTTOM,
   MAX_PLAYERS,
   MOVE_SPEED,
   SPAWN_AREA,
@@ -19,6 +21,7 @@ import {
   normalizeNickname,
 } from '../../shared/nickname.ts';
 import type {
+  ActionType,
   AdminAvatar,
   AnswerTally,
   CharacterKey,
@@ -31,6 +34,7 @@ import type {
   RankingEntry,
   RevealPayload,
   Room,
+  RoundAction,
   StateSnapshot,
 } from '../../shared/types.ts';
 import { judgeRound, rankPlayers } from './scoring.ts';
@@ -39,6 +43,8 @@ export type JoinResult = { ok: true; player: Player } | { ok: false; error: Erro
 export type CommandResult = { ok: true } | { ok: false; error: ErrorPayload };
 
 const OK: CommandResult = { ok: true };
+const ACTION_TYPES = new Set<ActionType>(['BET_CORRECT', 'BET_WRONG', 'LAUGH', 'NONE']);
+export type ActionResult = { ok: true; action: RoundAction; laugh: boolean } | { ok: false; error: ErrorPayload };
 const WRONG_PHASE = () => fail('INVALID_PHASE', '지금 단계에서는 할 수 없는 동작입니다.');
 
 const CHARACTER_KEYS = new Set<string>(CHARACTERS.map((c) => c.key));
@@ -73,6 +79,7 @@ export class GameRoom {
   admin: AdminAvatar | null = null;
   ranking: RankingEntry[] | null = null;
   questionStartedAt: number | null = null;
+  private lastLaughAt = new Map<string, number>();
 
   constructor(questions: Question[] = []) {
     this.state = GameRoom.emptyRoom(questions);
@@ -167,7 +174,7 @@ export class GameRoom {
       return false;
     }
     mover.targetX = clamp(x, FIELD_MARGIN, FIELD_WIDTH - FIELD_MARGIN);
-    mover.targetY = clamp(y, FIELD_MARGIN, FIELD_HEIGHT - FIELD_MARGIN);
+    mover.targetY = clamp(y, FIELD_MARGIN, FIELD_HEIGHT - FIELD_MARGIN_BOTTOM);
     return true;
   }
 
@@ -217,6 +224,52 @@ export class GameRoom {
 
   currentQuestion(): Question | null {
     return this.state.questions[this.state.currentIndex] ?? null;
+  }
+
+  // ─── 7장 추가 행동 ───
+
+  actionOf(playerId: string): RoundAction {
+    return this.state.actions[playerId] ?? { type: 'NONE' };
+  }
+
+  // 문제 진행 중(타이머가 도는 동안)에만 고르고 바꿀 수 있다. 판정 시점의 선택이 최종.
+  // 3번(웃기)을 고르면 말풍선도 띄운다(1초 쿨다운).
+  setAction(playerId: string, type: unknown, targetId: unknown, now = Date.now()): ActionResult {
+    const player = this.state.players[playerId];
+    if (!player) return fail('INVALID_PAYLOAD', '잘못된 요청입니다.');
+    const { phase, deadline } = this.state;
+    if (phase !== 'QUESTION' || (deadline !== undefined && now >= deadline)) return WRONG_PHASE();
+    if (typeof type !== 'string' || !ACTION_TYPES.has(type as ActionType)) {
+      return fail('INVALID_PAYLOAD', '잘못된 행동입니다.');
+    }
+
+    let action: RoundAction;
+    if (type === 'BET_CORRECT' || type === 'BET_WRONG') {
+      if (typeof targetId !== 'string' || targetId === playerId || !this.state.players[targetId]) {
+        return fail('INVALID_TARGET', '찍을 수 없는 플레이어입니다.');
+      }
+      action = { type, targetId };
+    } else {
+      action = { type: type as 'LAUGH' | 'NONE' };
+    }
+    this.state.actions[playerId] = action;
+    const laugh = action.type === 'LAUGH' && this.consumeLaugh(playerId, now);
+    return { ok: true, action, laugh };
+  }
+
+  // 정답 공개 때는 3번 웃기만 허용. 말풍선만 띄우고 이번 문제의 행동은 바꾸지 않는다.
+  laugh(playerId: string, now = Date.now()): CommandResult {
+    if (!this.state.players[playerId]) return fail('INVALID_PAYLOAD', '잘못된 요청입니다.');
+    if (this.state.phase !== 'REVEAL') return WRONG_PHASE();
+    if (!this.consumeLaugh(playerId, now)) return fail('COOLDOWN', '잠시 후 다시 눌러 주세요.');
+    return OK;
+  }
+
+  private consumeLaugh(playerId: string, now: number): boolean {
+    const last = this.lastLaughAt.get(playerId);
+    if (last !== undefined && now - last < LAUGH_COOLDOWN_MS) return false;
+    this.lastLaughAt.set(playerId, now);
+    return true;
   }
 
   // ─── 6장 단계 전환 (관리자 버튼과 타이머) ───
@@ -296,6 +349,7 @@ export class GameRoom {
     this.state = GameRoom.emptyRoom(this.state.questions);
     this.ranking = null;
     this.questionStartedAt = null;
+    this.lastLaughAt.clear();
   }
 
   revealPayload(): RevealPayload | null {

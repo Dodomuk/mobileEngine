@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ADMIN_ID, ANSWER_CIRCLES, circleAt, FIELD_HEIGHT, FIELD_MARGIN, FIELD_WIDTH, MAX_PLAYERS, MOVE_SPEED, SPAWN_AREA } from '../../shared/constants.ts';
+import { ADMIN_ID, ANSWER_CIRCLES, circleAt, FIELD_HEIGHT, FIELD_MARGIN, FIELD_MARGIN_BOTTOM, FIELD_WIDTH, MAX_PLAYERS, MOVE_SPEED, SPAWN_AREA } from '../../shared/constants.ts';
 import { loadQuestions } from './questions.ts';
 import { GameRoom } from './room.ts';
 
@@ -120,25 +120,25 @@ describe('이동', () => {
 
   it('틱마다 초속 320으로 목표를 향해 직선 이동한다', () => {
     const room = new GameRoom();
-    const p = placed(room, 100, 1000);
-    room.setTarget(p.id, 100 + 1000, 1000); // 경계로 잘림
+    const p = placed(room, 100, 700);
+    room.setTarget(p.id, 100 + 5000, 700); // 경계로 잘림
     expect(room.tick(0.1)).toBe(true);
     expect(p.x).toBeCloseTo(100 + MOVE_SPEED * 0.1);
-    expect(p.y).toBe(1000);
+    expect(p.y).toBe(700);
   });
 
   it('대각선 이동도 속도가 같다', () => {
     const room = new GameRoom();
-    const p = placed(room, 100, 1000);
-    room.setTarget(p.id, 400, 600);
+    const p = placed(room, 100, 700);
+    room.setTarget(p.id, 600, 200);
     room.tick(0.5);
-    expect(Math.hypot(p.x - 100, p.y - 1000)).toBeCloseTo(MOVE_SPEED * 0.5);
+    expect(Math.hypot(p.x - 100, p.y - 700)).toBeCloseTo(MOVE_SPEED * 0.5);
   });
 
   it('목표를 지나치지 않고 도착하면 멈춘다', () => {
     const room = new GameRoom();
-    const p = placed(room, 100, 1000);
-    room.setTarget(p.id, 110, 1000);
+    const p = placed(room, 100, 700);
+    room.setTarget(p.id, 110, 700);
     room.tick(0.1);
     expect(p.x).toBe(110);
     expect(room.tick(0.1)).toBe(false);
@@ -146,22 +146,22 @@ describe('이동', () => {
 
   it('이동 중 다시 터치하면 목표만 바뀐다', () => {
     const room = new GameRoom();
-    const p = placed(room, 100, 1000);
-    room.setTarget(p.id, 700, 1000);
+    const p = placed(room, 100, 700);
+    room.setTarget(p.id, 900, 700);
     room.tick(0.1);
     const x = p.x;
-    room.setTarget(p.id, x, 500);
+    room.setTarget(p.id, x, 200);
     room.tick(0.1);
     expect(p.x).toBeCloseTo(x);
-    expect(p.y).toBeCloseTo(1000 - MOVE_SPEED * 0.1);
+    expect(p.y).toBeCloseTo(700 - MOVE_SPEED * 0.1);
   });
 
   it('필드 밖 좌표는 경계로 자른다', () => {
     const room = new GameRoom();
-    const p = placed(room, 100, 1000);
+    const p = placed(room, 100, 700);
     room.setTarget(p.id, -500, 99999);
     expect(p.targetX).toBe(FIELD_MARGIN);
-    expect(p.targetY).toBe(FIELD_HEIGHT - FIELD_MARGIN);
+    expect(p.targetY).toBe(FIELD_HEIGHT - FIELD_MARGIN_BOTTOM);
     room.setTarget(p.id, 99999, -1);
     expect(p.targetX).toBe(FIELD_WIDTH - FIELD_MARGIN);
     expect(p.targetY).toBe(FIELD_MARGIN);
@@ -169,7 +169,7 @@ describe('이동', () => {
 
   it('잘못된 좌표는 무시한다', () => {
     const room = new GameRoom();
-    const p = placed(room, 100, 1000);
+    const p = placed(room, 100, 700);
     for (const [x, y] of [[NaN, 1], [1, Infinity], ['1', 2], [null, undefined]]) {
       expect(room.setTarget(p.id, x, y)).toBe(false);
     }
@@ -178,7 +178,7 @@ describe('이동', () => {
 
   it('REVEAL·RESULT 단계에서는 이동 입력을 무시한다', () => {
     const room = new GameRoom();
-    const p = placed(room, 100, 1000);
+    const p = placed(room, 100, 700);
     for (const phase of ['REVEAL', 'RESULT'] as const) {
       room.state.phase = phase;
       expect(room.setTarget(p.id, 300, 300)).toBe(false);
@@ -189,18 +189,18 @@ describe('이동', () => {
 
   it('positions는 정수 좌표만 보낸다', () => {
     const room = new GameRoom();
-    const p = placed(room, 100.4, 1000.6);
-    expect(room.positions()).toEqual([{ id: p.id, x: 100, y: 1001 }]);
+    const p = placed(room, 100.4, 700.6);
+    expect(room.positions()).toEqual([{ id: p.id, x: 100, y: 701 }]);
   });
 });
 
 describe('circleAt', () => {
   it('원 중심·경계 안은 해당 알파벳, 밖은 null', () => {
-    expect(circleAt(192, 440)).toBe('A');
-    expect(circleAt(576 + 150, 440)).toBe('B'); // 경계 포함
-    expect(circleAt(384, 820 + 151)).toBeNull();
-    expect(circleAt(384, 1100)).toBeNull();
-    expect(circleAt(384, 440)).toBeNull(); // A·B 사이
+    expect(circleAt(300, 470)).toBe('A');
+    expect(circleAt(720 + 150, 470)).toBe('B'); // 경계 포함
+    expect(circleAt(1140, 470 + 151)).toBeNull();
+    expect(circleAt(720, 720)).toBeNull(); // 대기 영역
+    expect(circleAt(510, 470)).toBeNull(); // A·B 사이
   });
 });
 
@@ -215,7 +215,7 @@ describe('문제 진행 (6장)', () => {
   }
 
   function stand(p: { x: number; y: number; targetX: number; targetY: number }, choice: 'A' | 'B' | 'C' | null) {
-    const pos = choice ? ANSWER_CIRCLES[choice] : { x: 384, y: 1100 };
+    const pos = choice ? ANSWER_CIRCLES[choice] : { x: 720, y: 720 };
     p.x = p.targetX = pos.x;
     p.y = p.targetY = pos.y;
   }
@@ -342,5 +342,79 @@ describe('문제 진행 (6장)', () => {
     expect(room.positions().some((p) => p.id === ADMIN_ID)).toBe(true);
     expect(room.setTarget(ADMIN_ID, 300, 300)).toBe(true);
     expect(room.snapshot().players.some((p) => p.nickname === '관리자')).toBe(false);
+  });
+});
+
+describe('추가 행동 (7장)', () => {
+  const questions = loadQuestions(path.resolve(__dirname, '../data/questions.json'));
+
+  function setup() {
+    const room = new GameRoom(questions);
+    const a = joinOk(room, '철수');
+    const b = joinOk(room, '영희');
+    room.start(0);
+    return { room, a, b };
+  }
+
+  it('문제 진행 중에만 고를 수 있고 여러 번 바꿀 수 있다(마지막 선택이 최종)', () => {
+    const room = new GameRoom(questions);
+    const a = joinOk(room, '철수');
+    const b = joinOk(room, '영희');
+    expect(room.setAction(a.id, 'LAUGH', undefined, 0).ok).toBe(false); // LOBBY
+    room.start(0);
+    expect(room.setAction(a.id, 'BET_CORRECT', b.id, 1000).ok).toBe(true);
+    expect(room.setAction(a.id, 'BET_WRONG', b.id, 2000).ok).toBe(true);
+    expect(room.actionOf(a.id)).toEqual({ type: 'BET_WRONG', targetId: b.id });
+    expect(room.setAction(a.id, 'NONE', undefined, 120_000).ok).toBe(false); // 타이머 종료 후
+  });
+
+  it('문제당 행동은 1개: 찍기 뒤 웃기를 고르면 찍기는 취소된다', () => {
+    const { room, a, b } = setup();
+    room.setAction(a.id, 'BET_CORRECT', b.id, 1000);
+    room.setAction(a.id, 'LAUGH', undefined, 2000);
+    expect(room.actionOf(a.id)).toEqual({ type: 'LAUGH' });
+  });
+
+  it('자기 자신·없는 플레이어·관리자는 찍을 수 없다', () => {
+    const { room, a } = setup();
+    for (const target of [a.id, 'ghost', ADMIN_ID, undefined]) {
+      const result = room.setAction(a.id, 'BET_CORRECT', target, 1000);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.code).toBe('INVALID_TARGET');
+    }
+    expect(room.setAction(a.id, 'JUMP', undefined, 1000).ok).toBe(false);
+  });
+
+  it('웃기는 1초 쿨다운, 정답 공개 때는 말풍선만 띄우고 행동은 그대로', () => {
+    const { room, a, b } = setup();
+    expect(room.setAction(a.id, 'LAUGH', undefined, 1000)).toMatchObject({ ok: true, laugh: true });
+    expect(room.setAction(a.id, 'LAUGH', undefined, 1500)).toMatchObject({ ok: true, laugh: false });
+    expect(room.setAction(a.id, 'LAUGH', undefined, 2100)).toMatchObject({ ok: true, laugh: true });
+    room.setAction(b.id, 'BET_CORRECT', a.id, 3000);
+    expect(room.laugh(b.id, 3000).ok).toBe(false); // QUESTION에서는 player:laugh 불가
+    room.reveal();
+    expect(room.laugh(b.id, 4000).ok).toBe(true);
+    expect(room.laugh(b.id, 4500).ok).toBe(false);
+    expect(room.actionOf(b.id)).toEqual({ type: 'BET_CORRECT', targetId: a.id });
+  });
+
+  it('판정에 찍기 점수가 반영되고, 다음 문제에서는 무행동으로 초기화된다', () => {
+    const { room, a, b } = setup(); // p1 정답 B
+    a.x = a.targetX = ANSWER_CIRCLES.B.x;
+    a.y = a.targetY = ANSWER_CIRCLES.B.y;
+    room.setAction(b.id, 'BET_CORRECT', a.id, 1000);
+    room.setAction(a.id, 'BET_CORRECT', b.id, 1000);
+    room.reveal();
+    expect(a.score).toBe(10 - 2);
+    expect(b.score).toBe(2);
+    expect(room.revealPayload()!.perPlayer[b.id].action).toEqual({ type: 'BET_CORRECT', targetId: a.id });
+    room.next(2000);
+    expect(room.actionOf(a.id)).toEqual({ type: 'NONE' });
+  });
+
+  it('플레이어용 스냅샷에는 다른 사람의 행동이 없다', () => {
+    const { room, a, b } = setup();
+    room.setAction(a.id, 'BET_WRONG', b.id, 1000);
+    expect(JSON.stringify(room.snapshot())).not.toContain('BET_WRONG');
   });
 });

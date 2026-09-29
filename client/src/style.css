@@ -238,6 +238,45 @@ body {
   cursor: not-allowed;
 }
 
+/* 가로 화면(높이가 낮은 폰)에서는 입장 화면을 두 칸으로 */
+@media (orientation: landscape) and (max-height: 540px) {
+  .entry {
+    max-width: 860px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+    padding-top: calc(env(safe-area-inset-top, 0px) + 10px);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+
+  .entry-header {
+    grid-column: 1 / -1;
+  }
+
+  .entry-header h1 {
+    margin: 0 0 2px;
+    font-size: 24px;
+  }
+
+  .entry-header p {
+    font-size: 12px;
+  }
+
+  .character-grid {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+
+  .character-card,
+  .character-card:nth-child(4) {
+    grid-column: auto;
+    min-height: 84px;
+    padding: 6px 2px;
+    font-size: 12px;
+  }
+}
+
 /* 대기실 */
 .lobby-banner {
   padding: 12px 14px;
@@ -268,27 +307,33 @@ body {
   touch-action: none;
 }
 
-/* 오버레이는 터치를 필드로 흘려보낸다 */
-.game-top,
-.game-bottom {
+/* HUD는 필드 영역 위에 얹고, 터치는 필드로 흘려보낸다. 버튼류만 pointer-events를 되살린다. */
+.hud-top,
+.hud-bottom {
   position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
   z-index: 1;
-  width: min(var(--field-width), 520px);
-  padding: 0 10px;
+  left: calc(var(--field-left, 0px) + 8px);
+  width: calc(var(--field-width, 100vw) - 16px);
   pointer-events: none;
 }
 
-.game-top {
-  top: calc(env(safe-area-inset-top, 0px) + 8px);
+.hud-top {
+  top: calc(var(--field-top, 0px) + 6px);
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  align-items: flex-start;
+  gap: 8px;
 }
 
-.game-bottom {
-  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+.hud-left {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-bottom {
+  bottom: calc(100% - var(--field-top, 0px) - var(--field-height, 100vh) + 6px);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -296,17 +341,18 @@ body {
 }
 
 .game .lobby-banner {
-  font-size: 14px;
-  padding: 10px 12px;
+  align-self: flex-start;
+  font-size: 13px;
+  padding: 7px 12px;
 }
 
 .my-score,
 .my-choice {
-  padding: 8px 14px;
+  padding: 5px 12px;
   border-radius: 999px;
   background: rgba(20, 30, 25, 0.78);
   color: #fff;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
 }
@@ -320,23 +366,24 @@ body {
   color: #2b2100;
 }
 
-/* 3장 문제 카드: 주제·번호·타이머·선택지 (문제 텍스트 없음) */
-.question-card {
-  padding: 8px 10px 10px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.95);
-  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.15);
-}
-
-.q-meta {
+/* 3장 상단 바: 연습 배지·주제·번호·타이머 (문제 텍스트 없음) */
+.q-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  padding: 5px 8px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.15);
   font-weight: 800;
 }
 
+.q-bar[hidden] {
+  display: none;
+}
+
 .badge-practice {
+  flex: none;
   padding: 2px 8px;
   border-radius: 6px;
   background: #ff5da2;
@@ -345,6 +392,7 @@ body {
 }
 
 .q-topic {
+  flex: none;
   padding: 2px 8px;
   border-radius: 6px;
   background: #1f2a24;
@@ -353,14 +401,18 @@ body {
 }
 
 .q-number {
-  margin-left: auto;
-  font-size: 15px;
+  flex: none;
+  font-size: 14px;
+}
+
+.q-timer-slot {
+  flex: 1;
+  min-width: 60px;
 }
 
 .timer {
   position: relative;
   height: 18px;
-  margin: 6px 0;
   border-radius: 999px;
   background: #e3e8e5;
   overflow: hidden;
@@ -388,61 +440,173 @@ body {
 }
 
 .q-image {
+  flex: none;
   display: block;
-  max-width: 100%;
-  max-height: 56px;
-  margin: 4px auto;
+  height: 28px;
+  max-width: 120px;
   object-fit: contain;
 }
 
-.q-choices {
+.reveal-note {
+  align-self: flex-start;
+  margin: 0;
+  padding: 5px 10px;
+  border-radius: 10px;
+  background: rgba(20, 30, 25, 0.88);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* 7장 추가 행동 아이콘(우측 상단) */
+.action-bar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  pointer-events: auto;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.action-button {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 3px solid transparent;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.18);
+  font-size: 22px;
+  font-weight: 900;
+  color: #495057;
+  cursor: pointer;
+}
+
+.action-button.selected {
+  border-color: var(--accent);
+  background: #fff4e3;
+}
+
+.action-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.action-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.action-target {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(20, 30, 25, 0.8);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.action-target:empty {
+  display: none;
+}
+
+/* 7장 플레이어 선택 모달 */
+.target-modal {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.5);
+  touch-action: pan-y;
+}
+
+.target-modal[hidden] {
+  display: none;
+}
+
+.target-card {
+  width: min(420px, 100%);
+  max-height: calc(100dvh - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.target-title {
+  margin: 0;
+  font-size: 17px;
+}
+
+.target-list {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 6px;
 }
 
-.q-choices li {
+.target-option {
+  width: 100%;
+  min-height: 48px;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  padding: 3px 8px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 1.3;
+  padding: 4px 10px;
+  border: 2px solid #e3e8e5;
+  border-radius: 12px;
+  background: #f8faf9;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
 }
 
-.q-choices li b {
-  flex: none;
-  width: 1.2em;
-  font-weight: 900;
+.target-option:active {
+  border-color: var(--accent);
 }
 
-.q-choices li[data-choice='A'] b { color: #d6302a; }
-.q-choices li[data-choice='B'] b { color: #1f64d6; }
-.q-choices li[data-choice='C'] b { color: #11813f; }
-
-.q-choices li.correct {
-  background: #ffe066;
+.target-cancel {
+  min-height: 44px;
+  border: none;
+  border-radius: 12px;
+  background: #e9ecef;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
 }
 
-.q-choices li.wrong {
-  opacity: 0.45;
+/* 가로 게임: 폰을 세로로 들면 돌려 달라고 안내한다 */
+.rotate-portrait {
+  display: none;
 }
 
-.reveal-note {
-  margin: 6px 0 0;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: #1f2a24;
-  color: #fff;
-  font-size: 14px;
-  font-weight: 700;
-  text-align: center;
-  white-space: pre-line;
+@media (orientation: portrait) and (pointer: coarse) {
+  .rotate-portrait {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    background: #1f2a24;
+    color: #fff;
+    font-size: 20px;
+    font-weight: 800;
+    touch-action: none;
+  }
 }
 
 /* 최종 결과 (롤링 애니메이션은 M5) */
@@ -785,36 +949,16 @@ body {
   color: var(--danger);
 }
 
-/* 넓은 화면(노트북)에서는 필드 옆에 패널을 둔다 */
-@media (min-width: 900px) {
+/* 넓은 화면(노트북)이나 가로로 든 폰에서는 필드 옆에 패널을 둔다 */
+@media (min-width: 900px), (orientation: landscape) and (min-width: 640px) {
   .admin {
-    grid-template-columns: minmax(0, 1fr) 440px;
+    grid-template-columns: minmax(0, 1fr) clamp(300px, 34vw, 440px);
     grid-template-rows: minmax(0, 1fr) auto;
     grid-template-areas: 'field panel' 'field controls';
   }
 
   .admin-panel {
     max-height: none;
-  }
-}
-
-/* 11장: 세로 화면 고정 안내 */
-.rotate-notice {
-  display: none;
-}
-
-@media (orientation: landscape) and (max-height: 500px) {
-  .rotate-notice {
-    position: fixed;
-    inset: 0;
-    z-index: 200;
-    display: grid;
-    place-items: center;
-    background: #1f2a24;
-    color: #fff;
-    font-size: 18px;
-    font-weight: 700;
-    text-align: center;
   }
 }
 

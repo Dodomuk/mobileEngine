@@ -1,19 +1,23 @@
 import type { CharacterKey, Choice } from './types.ts';
 
-// 5장: 768×1280 논리 좌표계
-export const FIELD_WIDTH = 768;
-export const FIELD_HEIGHT = 1280;
-export const TILE_SIZE = 64;
+// 5장: 1440×800 논리 좌표계(가로 화면)
+export const FIELD_WIDTH = 1440;
+export const FIELD_HEIGHT = 800;
+export const TILE_SIZE = 80;
 // 캐릭터가 화면 밖으로 반쯤 나가지 않도록 목표 지점을 경계에서 이만큼 안쪽으로 자른다
 export const FIELD_MARGIN = 32;
+// 아래쪽은 발밑 닉네임 라벨까지 보이도록 더 넉넉히 둔다
+export const FIELD_MARGIN_BOTTOM = 72;
 
-// 5장: 시작 위치는 하단 대기 영역(y 1050~1200)
-export const SPAWN_AREA = { minX: 64, maxX: FIELD_WIDTH - 64, minY: 1050, maxY: 1200 };
+// 5장: 시작 위치는 하단 대기 영역(y 670~720)
+export const SPAWN_AREA = { minX: 120, maxX: FIELD_WIDTH - 120, minY: 670, maxY: 720 };
 
+// 5장: 상단 약 300은 문제 UI와 선택지 글자 자리라 원을 두지 않는다.
+// 세 원은 한 줄로 놓이고 서로 겹치지 않는다(중심 간 거리 420 ≥ 지름 300).
 export const ANSWER_CIRCLES: Record<Choice, { x: number; y: number; r: number; color: string }> = {
-  A: { x: 192, y: 440, r: 150, color: 'rgba(235, 64, 52, 0.55)' },
-  B: { x: 576, y: 440, r: 150, color: 'rgba(40, 110, 230, 0.55)' },
-  C: { x: 384, y: 820, r: 150, color: 'rgba(20, 150, 70, 0.55)' },
+  A: { x: 300, y: 470, r: 150, color: 'rgba(235, 64, 52, 0.55)' },
+  B: { x: 720, y: 470, r: 150, color: 'rgba(40, 110, 230, 0.55)' },
+  C: { x: 1140, y: 470, r: 150, color: 'rgba(20, 150, 70, 0.55)' },
 };
 
 export const MOVE_SPEED = 320; // 논리 단위/초
@@ -33,6 +37,9 @@ export const MAIN_COUNT = 20;
 export const DEFAULT_TIME_LIMIT_SEC = 120;
 export const SCORE_CORRECT = 10;
 export const SCORE_BET = 2;
+// 7장: 웃기 말풍선 표시 시간과 연타 방지 쿨다운
+export const LAUGH_BUBBLE_MS = 3000;
+export const LAUGH_COOLDOWN_MS = 1000;
 
 export const CHARACTERS: { key: CharacterKey; name: string; color: string }[] = [
   { key: 'orange_mushroom', name: '주황버섯', color: '#f39c3d' },

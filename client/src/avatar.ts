@@ -1,41 +1,24 @@
-import {
-  ADMIN_CHARACTER,
-  ADMIN_COLOR,
-  ADMIN_NICKNAME,
-  CHARACTERS,
-  characterImageUrl,
-} from '../../shared/constants.ts';
-import type { AdminCharacterKey, CharacterKey } from '../../shared/types.ts';
+import { characterImageUrl } from '../../shared/constants.ts';
+import { drawCharacterArt, type AnyCharacter } from './characters.ts';
 
-type AnyCharacter = CharacterKey | AdminCharacterKey;
-
-function characterInfo(key: AnyCharacter): { name: string; color: string } {
-  if (key === ADMIN_CHARACTER) return { name: ADMIN_NICKNAME, color: ADMIN_COLOR };
-  return CHARACTERS.find((c) => c.key === key) ?? { name: '?', color: '#999' };
-}
-
-// 4장: 이미지가 없으면 캐릭터별 색 원 + 이름 첫 글자로 대체한다.
+// 입장 화면·결과 목록용 캐릭터 그림. PNG가 있으면 PNG, 없으면 코드로 그린 캐릭터.
 export function createAvatar(key: AnyCharacter, size: number): HTMLElement {
   const wrap = document.createElement('div');
   wrap.className = 'avatar';
   wrap.style.width = wrap.style.height = `${size}px`;
 
-  const { name, color } = characterInfo(key);
-  const showPlaceholder = () => {
-    wrap.replaceChildren();
-    const circle = document.createElement('div');
-    circle.className = 'avatar-placeholder';
-    circle.style.background = color;
-    circle.style.fontSize = `${Math.round(size * 0.42)}px`;
-    circle.textContent = name.slice(0, 1);
-    wrap.append(circle);
-  };
+  const canvas = document.createElement('canvas');
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = canvas.height = Math.round(size * dpr);
+  canvas.style.width = canvas.style.height = `${size}px`;
+  const ctx = canvas.getContext('2d')!;
+  ctx.scale(dpr, dpr);
+  drawCharacterArt(ctx, key, size / 2, size * 0.97, size * 0.92);
+  wrap.append(canvas);
 
   const img = new Image();
-  img.alt = name;
   img.draggable = false;
-  img.onerror = showPlaceholder;
+  img.onload = () => wrap.replaceChildren(img);
   img.src = characterImageUrl(key);
-  wrap.append(img);
   return wrap;
 }

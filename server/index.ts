@@ -133,7 +133,7 @@ io.on('connection', (socket: GameSocket) => {
     const { player } = result;
     socket.data.playerId = player.id;
     playerSockets.set(player.id, socket.id);
-    ack({ ok: true, playerId: player.id, sessionToken: player.sessionToken });
+    ack({ ok: true, playerId: player.id, sessionToken: player.sessionToken, action: room.actionOf(player.id) });
     broadcastSnapshot();
   };
 
@@ -155,6 +155,28 @@ io.on('connection', (socket: GameSocket) => {
     const id = isAdmin() ? ADMIN_ID : socket.data.playerId;
     if (!id) return;
     room.setTarget(id, payload?.x, payload?.y);
+  });
+
+  // 7장: 누가 누구를 찍었는지는 정답 공개 전까지 본인에게만 알려 준다(ack)
+  socket.on('player:action', (payload, ack) => {
+    if (typeof ack !== 'function') return;
+    const { playerId } = socket.data;
+    if (!playerId) {
+      ack({ ok: false, error: { code: 'INVALID_PAYLOAD', message: '먼저 입장해 주세요.' } });
+      return;
+    }
+    const result = room.setAction(playerId, payload?.type, payload?.targetId);
+    if (!result.ok) {
+      ack(result);
+      return;
+    }
+    ack({ ok: true, action: result.action });
+    if (result.laugh) io.emit('player:laugh', { playerId });
+  });
+
+  socket.on('player:laugh', () => {
+    const { playerId } = socket.data;
+    if (playerId && room.laugh(playerId).ok) io.emit('player:laugh', { playerId });
   });
 
   socket.on('admin:auth', (payload, ack) => {
