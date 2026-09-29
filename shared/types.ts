@@ -101,6 +101,11 @@ export type ErrorCode =
   | 'INVALID_PHASE'
   | 'INVALID_TARGET'
   | 'COOLDOWN'
+  | 'INVALID_BOARD'
+  | 'NOT_YOUR_TURN'
+  | 'ALREADY_USED'
+  | 'GAME_IN_PROGRESS'
+  | 'NOT_READY'
   | 'ADMIN_REPLACED';
 
 export interface ErrorPayload { code: ErrorCode; message: string }

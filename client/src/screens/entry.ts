@@ -1,15 +1,28 @@
 import { CHARACTERS, NICKNAME_MAX } from '../../../shared/constants.ts';
 import { isValidNicknameLength, nicknameLength, normalizeNickname } from '../../../shared/nickname.ts';
-import type { CharacterKey, JoinAck } from '../../../shared/types.ts';
+import type { CharacterKey, ErrorPayload } from '../../../shared/types.ts';
 import { createAvatar } from '../avatar.ts';
-import { socket } from '../socket.ts';
 
-// 3장 입장 화면: 캐릭터 5종 중 1개 + 닉네임 → 「입장하기」
-export function renderEntry(root: HTMLElement, onJoined: (ack: Extract<JoinAck, { ok: true }>) => void): void {
+export type EntryAck = { ok: true; playerId: string; sessionToken: string } | { ok: false; error: ErrorPayload };
+
+export interface EntryOptions {
+  title: string;
+  // 오른쪽 위 작은 버튼: 퀴즈 ↔ 빙고 이동
+  switchTo: { href: string; label: string };
+  join: (payload: { nickname: string; character: CharacterKey }, done: (res: EntryAck) => void) => void;
+}
+
+// 3장 입장 화면: 캐릭터 1개 + 닉네임 → 「입장하기」. 퀴즈와 빙고가 함께 쓴다.
+export function renderEntry(
+  root: HTMLElement,
+  options: EntryOptions,
+  onJoined: (ack: Extract<EntryAck, { ok: true }>) => void,
+): void {
   root.innerHTML = `
     <main class="screen entry">
+      <a class="game-switch" href="${options.switchTo.href}">${options.switchTo.label}</a>
       <header class="entry-header">
-        <h1>ABC 광장 퀴즈</h1>
+        <h1></h1>
         <p>캐릭터와 닉네임을 정하면 입장할 수 있어요.<br />입장 후에는 바꿀 수 없어요.</p>
       </header>
       <section class="panel">
@@ -29,6 +42,7 @@ export function renderEntry(root: HTMLElement, onJoined: (ack: Extract<JoinAck, 
     </main>
   `;
 
+  root.querySelector('.entry-header h1')!.textContent = options.title;
   const grid = root.querySelector<HTMLDivElement>('.character-grid')!;
   const form = root.querySelector<HTMLFormElement>('.entry-form')!;
   const input = root.querySelector<HTMLInputElement>('#nickname')!;
@@ -80,7 +94,7 @@ export function renderEntry(root: HTMLElement, onJoined: (ack: Extract<JoinAck, 
     submitting = true;
     button.textContent = '입장 중…';
     update();
-    socket.emit('player:join', { nickname, character: selected }, (res) => {
+    options.join({ nickname, character: selected }, (res) => {
       submitting = false;
       button.textContent = '입장하기';
       if (res.ok) {

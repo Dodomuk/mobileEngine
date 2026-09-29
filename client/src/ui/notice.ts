@@ -12,11 +12,11 @@ export function showFullscreenNotice(title: string, body: string, durationMs = 3
   }, durationMs);
 }
 
-// 잘못된 요청 등 서버 error 이벤트를 짧게 알린다
-export function showToast(message: string): void {
+// 짧은 알림. error는 잘못된 요청 등(빨강), info는 일반 소식(어두운 색).
+export function showToast(message: string, tone: 'error' | 'info' = 'error'): void {
   document.querySelector('.toast')?.remove();
   const el = document.createElement('div');
-  el.className = 'toast';
+  el.className = `toast ${tone}`;
   el.setAttribute('role', 'alert');
   el.textContent = message;
   document.body.append(el);

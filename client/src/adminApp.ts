@@ -50,6 +50,7 @@ const BUTTONS: { command: Command; label: string; tone: string; visible: (s: Sta
 
 // 3장·6장 관리자 화면(/admin): PIN 인증 → 필드 + 문제 텍스트·정답·해설·인원 분포 + 진행 버튼
 export function startAdminApp(app: HTMLElement, reconnectOverlay: HTMLElement): void {
+  socket.connect();
   let token = loadToken();
   let authed = false;
   let view: AdminView | null = null;

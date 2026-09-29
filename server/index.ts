@@ -8,6 +8,7 @@ import { Server, type Socket } from 'socket.io';
 import { ADMIN_ID, TICK_MS } from '../shared/constants.ts';
 import type { ClientToServerEvents, ServerToClientEvents } from '../shared/events.ts';
 import type { ErrorPayload, JoinAck } from '../shared/types.ts';
+import { registerBingo } from './bingo/socket.ts';
 import { loadQuestions } from './game/questions.ts';
 import { GameRoom, type CommandResult, type JoinResult } from './game/room.ts';
 
@@ -46,15 +47,22 @@ let adminSocketId: string | undefined;
 let adminToken: string | undefined;
 let deadlineTimer: NodeJS.Timeout | undefined;
 
+const bingo = registerBingo(io, ADMIN_PIN);
+
 app.get('/healthz', (_req, res) => {
-  res.json({ ok: true, players: room.playerCount, phase: room.state.phase });
+  res.json({
+    ok: true,
+    players: room.playerCount,
+    phase: room.state.phase,
+    bingo: { players: bingo.playerCount, phase: bingo.phase },
+  });
 });
 
 // 개발 중에는 Vite가 클라이언트를 서빙하고, 배포 때는 빌드 결과물을 여기서 서빙한다.
 if (existsSync(clientDist)) {
   app.use(express.static(clientDist));
   // 없는 이미지가 index.html로 대체되지 않도록 화면 경로만 받는다
-  app.get(['/', '/admin'], (_req, res) => {
+  app.get(['/', '/admin', '/bingo', '/bingo/admin'], (_req, res) => {
     res.sendFile(path.join(clientDist, 'index.html'));
   });
 }

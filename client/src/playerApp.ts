@@ -7,6 +7,7 @@ import { socket } from './socket.ts';
 import { showFullscreenNotice, showToast } from './ui/notice.ts';
 
 export function startPlayerApp(app: HTMLElement, reconnectOverlay: HTMLElement): void {
+  socket.connect();
   let session: Session | null = loadSession();
   let lastSnapshot: StateSnapshot | null = null;
   let game: GameScreen | null = null;
@@ -18,7 +19,11 @@ export function startPlayerApp(app: HTMLElement, reconnectOverlay: HTMLElement):
 
   function showEntry(): void {
     leaveGame();
-    renderEntry(app, (res) => {
+    renderEntry(app, {
+      title: 'ABC 광장 퀴즈',
+      switchTo: { href: '/bingo', label: '🎱 빙고' },
+      join: (payload, done) => socket.emit('player:join', payload, done),
+    }, (res) => {
       session = { playerId: res.playerId, sessionToken: res.sessionToken };
       saveSession(session);
       showGame();
