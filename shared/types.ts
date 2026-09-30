@@ -33,11 +33,15 @@ export interface Question {
   answer: Choice;               // 관리자 전용 (REVEAL 전까지)
   explanation?: string;         // 관리자 전용
   imageUrl?: string;
-  timeLimitSec?: number;        // 기본 120
+  // 선택지마다 사진(보기 A·B·C가 사진인 문제). 각 원 위 선택지 카드에 보여 준다.
+  choiceImages?: { A: string; B: string; C: string };
+  // 사진 문제에서 선택지 글자도 사진 아래에 보여 줄지(기본은 사진만). 예: 영화 포스터 + 제목
+  showChoiceText?: boolean;
+  timeLimitSec?: number;        // 기본 30
 }
 
 // 플레이어에게 보내는 문제 형태: text, answer, explanation 제거
-export type PublicQuestion = Pick<Question, 'id' | 'stage' | 'topic' | 'choices' | 'imageUrl'> & {
+export type PublicQuestion = Pick<Question, 'id' | 'stage' | 'topic' | 'choices' | 'imageUrl' | 'choiceImages' | 'showChoiceText'> & {
   number: number; total: number; // 연습: 1~3 / 3, 본 게임: 1~20 / 20
 };
 
@@ -88,6 +92,7 @@ export interface StateSnapshot {
   serverNow: number;                // 기기 시계 차이 보정용
   lastRound: RevealPayload | null;  // REVEAL 단계에서만
   ranking: RankingEntry[] | null;   // RESULT 단계에서만
+  mainCount: number;                // 본 게임 문제 수(결과의 「정답 수 x/n」용)
 }
 
 export type ErrorCode =

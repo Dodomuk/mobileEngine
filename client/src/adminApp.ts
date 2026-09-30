@@ -1,4 +1,4 @@
-import { ADMIN_ID, MAIN_COUNT, PRACTICE_COUNT } from '../../shared/constants.ts';
+import { ADMIN_ID, PRACTICE_COUNT } from '../../shared/constants.ts';
 import type { AnswerTally, EmoteType, Question, RoundAction, StateSnapshot } from '../../shared/types.ts';
 import { syncClock } from './clock.ts';
 import { FieldView } from './field.ts';
@@ -183,7 +183,7 @@ function renderAdminView(app: HTMLElement): AdminView {
           <p class="admin-question-text"></p>
           <img class="q-image" alt="" hidden />
           <ol class="admin-choices">
-            ${CHOICES.map((c) => `<li data-choice="${c}"><b>${c}</b><span></span><em class="tally-count"></em></li>`).join('')}
+            ${CHOICES.map((c) => `<li data-choice="${c}"><b>${c}</b><img class="admin-choice-img" alt="" hidden /><span></span><em class="tally-count"></em></li>`).join('')}
           </ol>
           <p class="admin-none"></p>
           <p class="admin-explanation" hidden></p>
@@ -273,6 +273,10 @@ function renderAdminView(app: HTMLElement): AdminView {
       for (const c of CHOICES) {
         const li = choiceEls.get(c)!;
         li.querySelector('span')!.textContent = current.choices[c];
+        const thumb = li.querySelector<HTMLImageElement>('.admin-choice-img')!;
+        const url = current.choiceImages?.[c];
+        thumb.hidden = !url;
+        if (url && thumb.getAttribute('src') !== url) thumb.src = url;
         li.classList.toggle('correct', current.answer === c);
       }
       if (current.imageUrl) {
@@ -287,7 +291,7 @@ function renderAdminView(app: HTMLElement): AdminView {
 
     // 정답 공개·결과 때는 점수표
     if (s.phase === 'RESULT' && s.ranking) {
-      scoreboard.replaceChildren(renderRanking(s.ranking, null, MAIN_COUNT));
+      scoreboard.replaceChildren(renderRanking(s.ranking, null, s.mainCount));
     } else if (s.phase === 'REVEAL' && s.lastRound) {
       const round = s.lastRound;
       const rows = [...s.players]
@@ -313,7 +317,7 @@ function renderAdminView(app: HTMLElement): AdminView {
     } else if (s.phase === 'LOBBY') {
       const p = document.createElement('p');
       p.className = 'admin-hint';
-      p.textContent = `연습 ${PRACTICE_COUNT}문제 → 본 게임 ${MAIN_COUNT}문제. 「게임 시작」을 누르면 연습 1번이 시작됩니다.`;
+      p.textContent = `연습 ${PRACTICE_COUNT}문제 → 본 게임 ${s.mainCount}문제. 「게임 시작」을 누르면 연습 1번이 시작됩니다.`;
       scoreboard.replaceChildren(p);
     } else {
       scoreboard.replaceChildren();

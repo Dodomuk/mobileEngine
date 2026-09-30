@@ -243,7 +243,7 @@ export class GameRoom {
     const { phase, deadline } = this.state;
     if (phase !== 'QUESTION' || (deadline !== undefined && now >= deadline)) return WRONG_PHASE();
     if (this.questionStartedAt !== null && deadline !== undefined && now >= betDeadline(this.questionStartedAt, deadline)) {
-      return fail('INVALID_PHASE', '찍기는 문제 시작 후 30초까지만 할 수 있어요.');
+      return fail('INVALID_PHASE', '찍기는 문제 시작 후 15초까지만 할 수 있어요.');
     }
     if (typeof type !== 'string' || !ACTION_TYPES.has(type as ActionType)) {
       return fail('INVALID_PAYLOAD', '잘못된 행동입니다.');
@@ -374,6 +374,8 @@ export class GameRoom {
       topic: q.topic,
       choices: q.choices,
       ...(q.imageUrl ? { imageUrl: q.imageUrl } : {}),
+      ...(q.choiceImages ? { choiceImages: q.choiceImages } : {}),
+      ...(q.showChoiceText ? { showChoiceText: true } : {}),
       number: sameStage.indexOf(q) + 1,
       total: sameStage.length,
     };
@@ -396,6 +398,7 @@ export class GameRoom {
       serverNow: now,
       lastRound: this.revealPayload(),
       ranking: phase === 'RESULT' ? this.ranking : null,
+      mainCount: this.state.questions.filter((q) => q.stage === 'MAIN').length,
     };
   }
 

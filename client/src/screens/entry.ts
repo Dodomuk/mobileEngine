@@ -60,9 +60,10 @@ export function renderEntry(
     card.setAttribute('role', 'radio');
     card.setAttribute('aria-checked', 'false');
     card.dataset.key = c.key;
-    const label = document.createElement('span');
-    label.textContent = c.name;
-    card.append(createAvatar(c.key, 64), label);
+    // 카드에는 그림만 보여 주고, 이름은 화면 읽기용으로만 둔다
+    card.setAttribute('aria-label', c.name);
+    card.title = c.name;
+    card.append(createAvatar(c.key, 64));
     card.addEventListener('click', () => {
       selected = c.key;
       for (const el of grid.querySelectorAll<HTMLButtonElement>('.character-card')) {

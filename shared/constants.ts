@@ -30,15 +30,14 @@ export const MAX_PLAYERS = 15;
 export const NICKNAME_MIN = 1;
 export const NICKNAME_MAX = 8;
 
-// 1장·6장: 연습 3문제가 맨 앞, 이어서 본 게임 20문제
+// 1장·6장: 연습 3문제가 맨 앞, 이어서 본 게임 문제(개수는 questions.json에 있는 만큼)
 export const PRACTICE_COUNT = 3;
-export const MAIN_COUNT = 20;
 
-export const DEFAULT_TIME_LIMIT_SEC = 120;
-// 7장: 찍기(맞힘·틀림·초기화)는 문제 시작 후 30초까지만. 이모티콘·이동은 계속 가능.
-export const BET_WINDOW_MS = 30_000;
+export const DEFAULT_TIME_LIMIT_SEC = 30; // 문제당 제한 시간(문제마다 timeLimitSec로 바꿀 수 있음)
+// 7장: 찍기(맞힘·틀림·초기화)는 문제 시작 후 15초까지만. 이모티콘·이동은 계속 가능.
+export const BET_WINDOW_MS = 15_000;
 
-// 찍기 마감 시각: 시작 + 30초, 단 문제 제한 시간이 더 짧으면 그때까지
+// 찍기 마감 시각: 시작 + 15초, 단 문제 제한 시간이 더 짧으면 그때까지
 export function betDeadline(questionStartedAt: number, deadline: number): number {
   return Math.min(questionStartedAt + BET_WINDOW_MS, deadline);
 }

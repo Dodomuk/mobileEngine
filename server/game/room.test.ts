@@ -224,12 +224,12 @@ describe('문제 진행 (6장)', () => {
     return result.ok ? 'OK' : result.error!.code;
   }
 
-  it('LOBBY에서만 게임 시작, 연습 1번이 120초 타이머로 시작', () => {
+  it('LOBBY에서만 게임 시작, 연습 1번이 30초 타이머로 시작', () => {
     const { room } = setup();
     expect(codeOf(room.next())).toBe('INVALID_PHASE');
     expect(codeOf(room.start(1000))).toBe('OK');
     expect(room.state.phase).toBe('QUESTION');
-    expect(room.state.deadline).toBe(1000 + 120_000);
+    expect(room.state.deadline).toBe(1000 + 30_000);
     expect(codeOf(room.start())).toBe('INVALID_PHASE');
     expect(room.snapshot().question).toMatchObject({ id: 'p1', number: 1, total: 3, stage: 'PRACTICE' });
   });
@@ -273,7 +273,7 @@ describe('문제 진행 (6장)', () => {
     room.start(0); // p1 정답 B
     stand(a, 'B');
     expect(room.setTarget(a.id, 100, 100, 1000)).toBe(true);
-    expect(room.setTarget(a.id, 100, 100, 120_000)).toBe(false); // 타이머 지난 QUESTION
+    expect(room.setTarget(a.id, 100, 100, 30_000)).toBe(false); // 타이머 지난 QUESTION
     room.reveal();
     expect(a.targetX).toBe(a.x); // 멈춤
     expect(a.score).toBe(10);
@@ -307,11 +307,12 @@ describe('문제 진행 (6장)', () => {
     expect(a.score).toBe(0);
     expect(a.correctCount).toBe(0);
     expect(room.state.history).toEqual([]);
-    expect(room.snapshot().question).toMatchObject({ id: 'q1', number: 1, total: 20, stage: 'MAIN' });
+    expect(room.snapshot().question).toMatchObject({ id: 'q1', number: 1, total: questions.filter((q) => q.stage === 'MAIN').length, stage: 'MAIN' });
   });
 
-  it('본 게임 20번 뒤에만 결과 발표, 캐릭터 위치는 문제가 바뀌어도 유지', () => {
+  it('본 게임 마지막 문제 뒤에만 결과 발표, 캐릭터 위치는 문제가 바뀌어도 유지', () => {
     const { room, a, b } = setup();
+    const main = questions.filter((q) => q.stage === 'MAIN');
     room.start();
     for (let i = 0; i < 3; i++) {
       room.reveal();
@@ -319,11 +320,11 @@ describe('문제 진행 (6장)', () => {
     }
     room.startMain();
     stand(b, 'C');
-    for (let i = 0; i < 20; i++) {
-      stand(a, questions[3 + i].answer);
+    for (let i = 0; i < main.length; i++) {
+      stand(a, main[i].answer);
       if (i === 0) expect(b.x).toBe(ANSWER_CIRCLES.C.x);
       room.reveal();
-      if (i < 19) {
+      if (i < main.length - 1) {
         expect(codeOf(room.finish())).toBe('INVALID_PHASE');
         expect(codeOf(room.startMain())).toBe('INVALID_PHASE');
         room.next();
@@ -333,8 +334,10 @@ describe('문제 진행 (6장)', () => {
     expect(codeOf(room.finish())).toBe('OK');
     expect(room.state.phase).toBe('RESULT');
     const ranking = room.snapshot().ranking!;
-    expect(ranking[0]).toMatchObject({ nickname: '철수', score: 200, correctCount: 20, rank: 1 });
-    expect(ranking[1]).toMatchObject({ nickname: '영희', score: 70, correctCount: 7, rank: 2 });
+    const cCount = main.filter((q) => q.answer === 'C').length;
+    expect(ranking[0]).toMatchObject({ nickname: '철수', score: 10 * main.length, correctCount: main.length, rank: 1 });
+    expect(ranking[1]).toMatchObject({ nickname: '영희', score: 10 * cCount, correctCount: cCount, rank: 2 });
+    expect(room.snapshot().mainCount).toBe(main.length);
   });
 
   it('새 게임은 플레이어를 모두 내보내고 관리자는 남긴다', () => {
@@ -345,7 +348,7 @@ describe('문제 진행 (6장)', () => {
     expect(room.state.phase).toBe('LOBBY');
     expect(room.playerCount).toBe(0);
     expect(room.admin).not.toBeNull();
-    expect(room.state.questions).toHaveLength(23);
+    expect(room.state.questions).toHaveLength(questions.length);
   });
 
   it('관리자는 점수·집계에서 빠지고 위치만 브로드캐스트된다', () => {
@@ -383,18 +386,19 @@ describe('추가 행동 (7장)', () => {
     expect(room.setAction(a.id, 'NONE', undefined, 120_000).ok).toBe(false); // 타이머 종료 후
   });
 
-  it('찍기는 문제 시작 후 30초까지만(초기화 포함), 이모티콘은 그 뒤에도 가능', () => {
+  it('찍기는 문제 시작 후 15초까지만(초기화 포함), 이모티콘·이동은 그 뒤에도 가능', () => {
     const room = new GameRoom(questions);
     const a = joinOk(room, '철수');
     const b = joinOk(room, '영희');
     room.start(0);
-    expect(room.setAction(a.id, 'BET_CORRECT', b.id, 29_999).ok).toBe(true);
-    const late = room.setAction(a.id, 'BET_WRONG', b.id, 30_000);
+    expect(room.setAction(a.id, 'BET_CORRECT', b.id, 14_999).ok).toBe(true);
+    const late = room.setAction(a.id, 'BET_WRONG', b.id, 15_000);
     expect(late.ok).toBe(false);
-    if (!late.ok) expect(late.error.message).toContain('30초');
-    expect(room.setAction(a.id, 'NONE', undefined, 45_000).ok).toBe(false);
-    expect(room.actionOf(a.id)).toEqual({ type: 'BET_CORRECT', targetId: b.id }); // 30초 때 선택이 최종
-    expect(room.emote(a.id, 'LAUGH', 60_000).ok).toBe(true);
+    if (!late.ok) expect(late.error.message).toContain('15초');
+    expect(room.setAction(a.id, 'NONE', undefined, 20_000).ok).toBe(false);
+    expect(room.actionOf(a.id)).toEqual({ type: 'BET_CORRECT', targetId: b.id }); // 15초 때 선택이 최종
+    expect(room.emote(a.id, 'LAUGH', 25_000).ok).toBe(true);
+    expect(room.setTarget(a.id, 300, 470, 25_000)).toBe(true); // 답은 30초까지 바꿀 수 있다
     // 다음 문제에서는 다시 30초
     room.reveal();
     room.next(200_000);

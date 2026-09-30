@@ -57,11 +57,11 @@ const CHOICE_FONT = '700 30px system-ui, -apple-system, sans-serif';
 const CHOICE_LINE = 36;
 const CHOICE_MAX_WIDTH = 360; // 카드 폭(알맹이 포함)이 원 간격 420을 넘지 않도록
 
-// A·B·C 원 색: 밝은 면 → 기본 → 가장자리 → 옆면(두께)
-const CIRCLE_PALETTE: Record<Choice, { light: string; base: string; deep: string; side: string }> = {
-  A: { light: 'rgba(255, 190, 190, 0.92)', base: 'rgba(240, 82, 82, 0.8)', deep: 'rgba(170, 30, 40, 0.88)', side: '#9b2226' },
-  B: { light: 'rgba(200, 230, 255, 0.92)', base: 'rgba(66, 140, 235, 0.8)', deep: 'rgba(20, 70, 160, 0.88)', side: '#154a8a' },
-  C: { light: 'rgba(200, 245, 200, 0.92)', base: 'rgba(55, 178, 90, 0.8)', deep: 'rgba(20, 110, 50, 0.88)', side: '#17602f' },
+// A·B·C 테두리·알맹이 색: 밝은 쪽 → 기본 → 짙은 쪽
+const CIRCLE_PALETTE: Record<Choice, { light: string; base: string; deep: string }> = {
+  A: { light: 'rgba(255, 190, 190, 0.92)', base: 'rgba(240, 82, 82, 0.8)', deep: 'rgba(170, 30, 40, 0.88)' },
+  B: { light: 'rgba(200, 230, 255, 0.92)', base: 'rgba(66, 140, 235, 0.8)', deep: 'rgba(20, 70, 160, 0.88)' },
+  C: { light: 'rgba(200, 245, 200, 0.92)', base: 'rgba(55, 178, 90, 0.8)', deep: 'rgba(20, 110, 50, 0.88)' },
 };
 
 // 캐릭터 이미지: 없으면 색 원 + 이름 첫 글자로 그린다(4장 플레이스홀더)
@@ -75,6 +75,22 @@ function characterImage(key: AnyCharacter): HTMLImageElement | null {
   }
   return images.get(key) ?? null;
 }
+
+// 선택지 사진(보기가 사진인 문제). 불러오는 동안은 null.
+const choiceImageCache = new Map<string, HTMLImageElement | null>();
+function choiceImage(url: string): HTMLImageElement | null {
+  if (!choiceImageCache.has(url)) {
+    const img = new Image();
+    choiceImageCache.set(url, null);
+    img.onload = () => choiceImageCache.set(url, img);
+    img.src = url;
+  }
+  return choiceImageCache.get(url) ?? null;
+}
+
+// 사진 카드 크기(논리 좌표). 원 윗부분만 살짝 덮고, 오른쪽 위 이모티콘 버튼 줄(약 y 210까지)은 피한다.
+const PHOTO_H = 150;
+const PHOTO_OVERLAP = 66;
 
 // 선택지 글자를 최대 폭에 맞춰 줄바꿈한다(한글은 글자 단위, 공백이 있으면 단어 단위)
 function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: number): string[] {
@@ -125,6 +141,8 @@ export class FieldView {
   private reveal: RevealState | null = null;
   private inputEnabled = true;
   private choices: PublicQuestion['choices'] | null = null;
+  private choiceImages: PublicQuestion['choiceImages'] | null = null;
+  private showChoiceText = false;
   private emotes = new Map<string, { emote: EmoteType; start: number }>(); // 플레이어 id → 말풍선
   private background = document.createElement('canvas'); // 광장·자연 배경(해상도가 바뀔 때만 다시 그림)
 
@@ -184,6 +202,8 @@ export class FieldView {
     // 대기실·문제·정답 공개 중에 움직일 수 있다(최종 결과 화면만 막음)
     this.inputEnabled = snapshot.phase !== 'RESULT';
     this.choices = snapshot.question?.choices ?? null;
+    this.choiceImages = snapshot.question?.choiceImages ?? null;
+    this.showChoiceText = snapshot.question?.showChoiceText ?? false;
     this.setReveal(snapshot.phase === 'REVEAL' ? snapshot.lastRound : null);
   }
 
@@ -347,8 +367,8 @@ export class FieldView {
     }
   };
 
-  // A·B·C 원: 살짝 떠 있는 유리 원반. 옆면(두께) + 그라데이션 윗면 + 광택 + 음각 글자.
-  // 정답 공개 때는 정답 원만 금빛으로 빛나고 나머지는 흐려진다.
+  // A·B·C 원: 반투명 평면 원 + 그라데이션 테두리와 위쪽의 옅은 광택.
+  // 정답 공개 때는 정답 원만 금빛 테두리로 빛나고 나머지는 흐려진다.
   private drawCircles(ctx: CanvasRenderingContext2D, myChoice: Choice | null, now: number): void {
     const correct = this.reveal?.correct;
     const pulse = (Math.sin(now / 260) + 1) / 2;
@@ -358,112 +378,61 @@ export class FieldView {
       const isCorrect = choice === correct;
       const dimmed = correct !== undefined && !isCorrect;
       const active = correct === undefined && choice === myChoice;
-      const lift = isCorrect ? 18 : 12; // 원반 두께
 
       ctx.save();
-      ctx.globalAlpha = dimmed ? 0.38 : 1;
-
-      // 바닥 그림자
-      ctx.beginPath();
-      ctx.ellipse(c.x, c.y + lift + 6, c.r * 0.98, c.r * 0.96, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-      ctx.fill();
-
-      // 옆면(두께)
-      ctx.beginPath();
-      ctx.arc(c.x, c.y + lift, c.r, 0, Math.PI * 2);
-      ctx.fillStyle = p.side;
-      ctx.fill();
-
-      // 정답 원 금빛 후광
-      if (isCorrect) {
-        ctx.save();
-        ctx.shadowColor = `rgba(255, 196, 0, ${0.65 + pulse * 0.3})`;
-        ctx.shadowBlur = 34 + pulse * 22;
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, c.r + 6, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 214, 10, 0.35)';
-        ctx.fill();
-        ctx.restore();
-      } else if (active) {
-        ctx.save();
-        ctx.shadowColor = 'rgba(255, 255, 255, 0.95)';
-        ctx.shadowBlur = 26;
-        ctx.beginPath();
-        ctx.arc(c.x, c.y, c.r + 2, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.fill();
-        ctx.restore();
-      }
-
-      // 윗면: 왼쪽 위가 밝은 반투명 유리
-      const face = ctx.createRadialGradient(c.x - c.r * 0.35, c.y - c.r * 0.45, c.r * 0.1, c.x, c.y, c.r * 1.05);
-      face.addColorStop(0, p.light);
-      face.addColorStop(0.55, p.base);
-      face.addColorStop(1, p.deep);
+      ctx.globalAlpha = dimmed ? 0.35 : 1;
       ctx.beginPath();
       ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
-      ctx.fillStyle = face;
+      ctx.fillStyle = c.color;
       ctx.fill();
+      if (active || isCorrect) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+        ctx.fill();
+      }
 
+      // 위쪽 옅은 광택
       ctx.save();
       ctx.clip();
-      // 서리 낀 유리 느낌(정답·내 원은 더 밝게)
-      if (isCorrect || active) {
-        ctx.fillStyle = isCorrect ? 'rgba(255, 244, 200, 0.12)' : 'rgba(255, 255, 255, 0.14)';
-        ctx.fillRect(c.x - c.r, c.y - c.r, c.r * 2, c.r * 2);
-      }
-      // 위쪽 광택
-      const gloss = ctx.createLinearGradient(0, c.y - c.r, 0, c.y);
-      gloss.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+      const gloss = ctx.createLinearGradient(0, c.y - c.r, 0, c.y - c.r * 0.35);
+      gloss.addColorStop(0, 'rgba(255, 255, 255, 0.28)');
       gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
       ctx.beginPath();
-      ctx.ellipse(c.x, c.y - c.r * 0.42, c.r * 0.8, c.r * 0.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x, c.y - c.r * 0.62, c.r * 0.72, c.r * 0.3, 0, 0, Math.PI * 2);
       ctx.fillStyle = gloss;
-      ctx.fill();
-      // 아래쪽 반사광
-      ctx.beginPath();
-      ctx.ellipse(c.x, c.y + c.r * 0.85, c.r * 0.6, c.r * 0.18, 0, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
       ctx.fill();
       ctx.restore();
 
-      // 테두리: 바깥 흰 유리선 + 정답이면 금빛 그라데이션 링
+      // 그라데이션 테두리(정답이면 금빛으로 빛남)
       ctx.beginPath();
-      ctx.arc(c.x, c.y, c.r - 2, 0, Math.PI * 2);
+      ctx.arc(c.x, c.y, c.r - 3, 0, Math.PI * 2);
+      const ring = ctx.createLinearGradient(c.x - c.r, c.y - c.r, c.x + c.r, c.y + c.r);
       if (isCorrect) {
-        const ring = ctx.createLinearGradient(c.x - c.r, c.y - c.r, c.x + c.r, c.y + c.r);
         ring.addColorStop(0, '#fff9db');
-        ring.addColorStop(0.35, '#ffd43b');
-        ring.addColorStop(0.7, '#f59f00');
+        ring.addColorStop(0.4, '#ffd43b');
+        ring.addColorStop(0.75, '#f59f00');
         ring.addColorStop(1, '#fff3bf');
-        ctx.lineWidth = 10;
-        ctx.strokeStyle = ring;
+        ctx.shadowColor = `rgba(255, 196, 0, ${0.6 + pulse * 0.35})`;
+        ctx.shadowBlur = 22 + pulse * 18;
+        ctx.lineWidth = 12;
       } else {
-        ctx.lineWidth = active ? 7 : 4;
-        ctx.strokeStyle = active ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.6)';
+        ring.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+        ring.addColorStop(0.5, p.light);
+        ring.addColorStop(1, p.deep);
+        if (active) {
+          ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
+          ctx.shadowBlur = 18;
+        }
+        ctx.lineWidth = active ? 10 : 6;
       }
+      ctx.strokeStyle = ring;
       ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, c.r - (isCorrect ? 8 : 5), 0, Math.PI * 2);
-      ctx.lineWidth = 1.5;
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
-      ctx.stroke();
+      ctx.shadowBlur = 0;
 
-      // 글자: 그림자 + 흰→연한 그라데이션으로 도드라지게
       ctx.font = '900 140px system-ui, -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.save();
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
-      ctx.shadowOffsetY = 6;
-      ctx.shadowBlur = 10;
-      const letter = ctx.createLinearGradient(0, c.y - 60, 0, c.y + 70);
-      letter.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
-      letter.addColorStop(1, isCorrect ? 'rgba(255, 236, 153, 0.95)' : 'rgba(255, 255, 255, 0.72)');
-      ctx.fillStyle = letter;
+      ctx.fillStyle = active || isCorrect ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.7)';
       ctx.fillText(choice, c.x, c.y + 8);
-      ctx.restore();
 
       if (isCorrect) this.drawGlassPill(ctx, c.x, c.y + c.r - 40, '정답', 'gold', 30);
       ctx.restore();
@@ -534,9 +503,105 @@ export class FieldView {
     ctx.restore();
   }
 
+  // 보기가 사진인 문제: 각 원 위에 사진 카드(왼쪽 위에 A·B·C). 정답이면 금빛으로 빛난다.
+  private drawChoicePhotos(ctx: CanvasRenderingContext2D, now: number): void {
+    const images = this.choiceImages!;
+    const correct = this.reveal?.correct;
+    const pulse = (Math.sin(now / 260) + 1) / 2;
+    for (const choice of ['A', 'B', 'C'] as const) {
+      const c = ANSWER_CIRCLES[choice];
+      const p = CIRCLE_PALETTE[choice];
+      const img = choiceImage(images[choice]);
+      const imgW = img ? (img.naturalWidth / img.naturalHeight) * PHOTO_H : PHOTO_H * 0.66;
+      const pad = 8;
+      const w = imgW + pad * 2;
+      const h = PHOTO_H + pad * 2;
+      const bottom = c.y - c.r + PHOTO_OVERLAP;
+      const left = c.x - w / 2;
+      const top = bottom - h;
+      const isCorrect = choice === correct;
+
+      ctx.save();
+      ctx.globalAlpha = correct !== undefined && !isCorrect ? 0.45 : 1;
+      // 카드
+      ctx.save();
+      ctx.shadowColor = isCorrect ? `rgba(255, 196, 0, ${0.6 + pulse * 0.35})` : 'rgba(0, 0, 0, 0.3)';
+      ctx.shadowBlur = isCorrect ? 26 + pulse * 16 : 16;
+      ctx.shadowOffsetY = isCorrect ? 0 : 6;
+      ctx.beginPath();
+      ctx.roundRect(left, top, w, h, 18);
+      ctx.fillStyle = isCorrect ? 'rgba(255, 243, 191, 0.97)' : 'rgba(255, 255, 255, 0.95)';
+      ctx.fill();
+      ctx.restore();
+      // 사진
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(left + pad, top + pad, imgW, PHOTO_H, 12);
+      ctx.clip();
+      if (img) ctx.drawImage(img, left + pad, top + pad, imgW, PHOTO_H);
+      else {
+        ctx.fillStyle = '#e9ecef';
+        ctx.fillRect(left + pad, top + pad, imgW, PHOTO_H);
+      }
+      // 사진 아래쪽에 선택지 글자 띠(예: 영화 제목). 카드 높이는 그대로라 원을 더 가리지 않는다.
+      if (this.showChoiceText && this.choices) {
+        ctx.font = '800 20px system-ui, -apple-system, sans-serif';
+        const lines = wrapText(ctx, this.choices[choice], imgW - 10, 2);
+        const bandH = lines.length * 22 + 10;
+        const bandTop = top + pad + PHOTO_H - bandH;
+        ctx.fillStyle = 'rgba(15, 18, 30, 0.8)';
+        ctx.fillRect(left + pad, bandTop, imgW, bandH);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        lines.forEach((line, i) => ctx.fillText(line, c.x, bandTop + 5 + 22 * (i + 0.5) + 1));
+      }
+      ctx.restore();
+      // 테두리
+      ctx.beginPath();
+      ctx.roundRect(left, top, w, h, 18);
+      if (isCorrect) {
+        const ring = ctx.createLinearGradient(left, top, left + w, bottom);
+        ring.addColorStop(0, '#fff3bf');
+        ring.addColorStop(0.5, '#f59f00');
+        ring.addColorStop(1, '#ffe066');
+        ctx.lineWidth = 5;
+        ctx.strokeStyle = ring;
+      } else {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      }
+      ctx.stroke();
+      // 왼쪽 위 A·B·C 알맹이
+      const chip = 22;
+      const chipX = left + 6;
+      const chipY = top + 6;
+      const chipFill = ctx.createRadialGradient(chipX - 6, chipY - 8, 2, chipX, chipY, chip);
+      chipFill.addColorStop(0, p.light);
+      chipFill.addColorStop(1, p.deep);
+      ctx.beginPath();
+      ctx.arc(chipX, chipY, chip, 0, Math.PI * 2);
+      ctx.fillStyle = chipFill;
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#fff';
+      ctx.stroke();
+      ctx.font = '900 24px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(choice, chipX, chipY + 1);
+      ctx.restore();
+    }
+  }
+
   // 선택지 글자: 각 원 위의 유리 카드(왼쪽에 A·B·C 표시). 정답이면 금빛으로 빛난다.
   private drawChoiceLabels(ctx: CanvasRenderingContext2D, now: number): void {
     if (!this.choices) return;
+    if (this.choiceImages) {
+      this.drawChoicePhotos(ctx, now);
+      return;
+    }
     const correct = this.reveal?.correct;
     const pulse = (Math.sin(now / 260) + 1) / 2;
     ctx.save();

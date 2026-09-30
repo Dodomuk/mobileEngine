@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { MAIN_COUNT, PRACTICE_COUNT } from '../../shared/constants.ts';
+import { PRACTICE_COUNT } from '../../shared/constants.ts';
 import type { Question } from '../../shared/types.ts';
 
 const CHOICES = ['A', 'B', 'C'] as const;
@@ -33,6 +33,15 @@ export function validateQuestions(data: unknown): Question[] {
     if (!CHOICES.includes(q.answer as never)) problems.push(`${where}: answer는 A/B/C 중 하나여야 합니다.`);
     if (q.explanation !== undefined && typeof q.explanation !== 'string') problems.push(`${where}: explanation은 문자열이어야 합니다.`);
     if (q.imageUrl !== undefined && typeof q.imageUrl !== 'string') problems.push(`${where}: imageUrl은 문자열이어야 합니다.`);
+    if (q.showChoiceText !== undefined && typeof q.showChoiceText !== 'boolean') {
+      problems.push(`${where}: showChoiceText는 true/false여야 합니다.`);
+    }
+    if (q.choiceImages !== undefined) {
+      const images = q.choiceImages as Record<string, unknown> | null;
+      for (const c of CHOICES) {
+        if (!isNonEmptyString(images?.[c])) problems.push(`${where}: choiceImages.${c}가 없습니다.`);
+      }
+    }
     if (q.timeLimitSec !== undefined && !(typeof q.timeLimitSec === 'number' && q.timeLimitSec > 0)) {
       problems.push(`${where}: timeLimitSec은 양수여야 합니다.`);
     }
@@ -42,7 +51,7 @@ export function validateQuestions(data: unknown): Question[] {
   const practice = stages.filter((s) => s === 'PRACTICE').length;
   const main = stages.filter((s) => s === 'MAIN').length;
   if (practice !== PRACTICE_COUNT) problems.push(`연습 문제는 ${PRACTICE_COUNT}개여야 합니다 (현재 ${practice}개).`);
-  if (main !== MAIN_COUNT) problems.push(`본 게임 문제는 ${MAIN_COUNT}개여야 합니다 (현재 ${main}개).`);
+  if (main < 1) problems.push('본 게임 문제가 1개 이상 있어야 합니다.');
   if (stages.slice(0, practice).some((s) => s !== 'PRACTICE')) problems.push('연습 문제가 배열 맨 앞에 와야 합니다.');
 
   if (problems.length > 0) throw new Error(`questions.json 검증 실패\n- ${problems.join('\n- ')}`);

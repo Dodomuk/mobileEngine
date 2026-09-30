@@ -1,4 +1,4 @@
-import { EMOTES, MAIN_COUNT, betDeadline } from '../../../shared/constants.ts';
+import { EMOTES, betDeadline } from '../../../shared/constants.ts';
 import type {
   ActionType,
   Choice,
@@ -148,7 +148,7 @@ export function renderGame(root: HTMLElement): GameScreen {
     const end = betEndsAt();
     betTimer.textContent = open && end !== null ? `찍기 ${Math.ceil((end - serverTime()) / 1000)}초` : '찍기 마감';
     betTimer.classList.toggle('closed', !open);
-    betTimer.classList.toggle('urgent', open && end !== null && end - serverTime() <= 10_000);
+    betTimer.classList.toggle('urgent', open && end !== null && end - serverTime() <= 5_000);
     if (!open) modal.hidden = true;
     const noTargets = targets().length === 0;
     for (const a of ACTIONS) {
@@ -289,7 +289,7 @@ export function renderGame(root: HTMLElement): GameScreen {
         const key = JSON.stringify(next.ranking);
         if (key !== shownResultFor) {
           shownResultFor = key;
-          resultOverlay.replaceChildren(renderRanking(next.ranking, id, MAIN_COUNT));
+          resultOverlay.replaceChildren(renderRanking(next.ranking, id, next.mainCount));
         }
       } else {
         shownResultFor = null;
