@@ -364,6 +364,30 @@ body {
   visibility: hidden;
 }
 
+/* 정답 공개 때 해설(하단 가운데 유리 카드) */
+.reveal-explanation {
+  flex: 1;
+  max-width: 64%;
+  margin: 0;
+  padding: 6px 12px;
+  border: 1.5px solid rgba(255, 255, 255, 0.85);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.72));
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: #1f2a24;
+  font-size: 12.5px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
+  animation: explanation-in 0.4s cubic-bezier(0.2, 1.3, 0.4, 1);
+}
+
+@keyframes explanation-in {
+  from { opacity: 0; transform: translateY(12px); }
+}
+
 .my-choice.selected {
   background: var(--me);
   color: #2b2100;
@@ -547,6 +571,24 @@ body {
 
 .action-target:empty {
   display: none;
+}
+
+.bet-timer {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #2f9e44;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.bet-timer.urgent {
+  background: #f03e3e;
+}
+
+.bet-timer.closed {
+  background: rgba(20, 30, 25, 0.7);
 }
 
 /* 7장 플레이어 선택 모달 */

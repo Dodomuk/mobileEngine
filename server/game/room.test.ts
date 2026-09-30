@@ -176,13 +176,13 @@ describe('이동', () => {
     expect(p.targetX).toBe(100);
   });
 
-  it('REVEAL·RESULT 단계에서는 이동 입력을 무시한다', () => {
+  it('정답 공개 중에는 움직일 수 있고, 최종 결과에서는 이동 입력을 무시한다', () => {
     const room = new GameRoom();
     const p = placed(room, 100, 700);
-    for (const phase of ['REVEAL', 'RESULT'] as const) {
-      room.state.phase = phase;
-      expect(room.setTarget(p.id, 300, 300)).toBe(false);
-    }
+    room.state.phase = 'RESULT';
+    expect(room.setTarget(p.id, 300, 300)).toBe(false);
+    room.state.phase = 'REVEAL';
+    expect(room.setTarget(p.id, 300, 300)).toBe(true);
     room.state.phase = 'QUESTION';
     expect(room.setTarget(p.id, 300, 300)).toBe(true);
   });
@@ -243,6 +243,15 @@ describe('문제 진행 (6장)', () => {
     expect(room.snapshot().question).not.toHaveProperty('answer');
   });
 
+  it('해설은 정답 공개 때부터 모두에게 보이고, 문제 텍스트는 끝까지 관리자 전용', () => {
+    const { room } = setup();
+    room.start();
+    room.reveal();
+    const snapshot = room.snapshot();
+    expect(snapshot.lastRound?.explanation).toBe(questions[0].explanation);
+    expect(JSON.stringify(snapshot)).not.toContain(questions[0].text);
+  });
+
   it('판정: 원 안이면 해당 답, 밖이면 미제출. 정답 +10', () => {
     const { room, a, b } = setup();
     room.start(); // p1 정답 B
@@ -259,13 +268,19 @@ describe('문제 진행 (6장)', () => {
     expect(room.snapshot().lastRound?.scores[a.id].score).toBe(10);
   });
 
-  it('판정 후에는 이동할 수 없고, 타이머가 지난 QUESTION에서도 이동할 수 없다', () => {
+  it('판정 순간 제자리에 멈추고 점수는 그 위치로 확정, 공개 중에는 다시 움직일 수 있다', () => {
     const { room, a } = setup();
-    room.start(0);
+    room.start(0); // p1 정답 B
+    stand(a, 'B');
     expect(room.setTarget(a.id, 100, 100, 1000)).toBe(true);
-    expect(room.setTarget(a.id, 100, 100, 120_000)).toBe(false);
+    expect(room.setTarget(a.id, 100, 100, 120_000)).toBe(false); // 타이머 지난 QUESTION
     room.reveal();
-    expect(room.setTarget(a.id, 100, 100)).toBe(false);
+    expect(a.targetX).toBe(a.x); // 멈춤
+    expect(a.score).toBe(10);
+    expect(room.setTarget(a.id, 300, 470)).toBe(true); // A로 옮겨도
+    room.tick(5);
+    expect(a.score).toBe(10); // 점수는 그대로
+    expect(room.revealPayload()!.perPlayer[a.id].answer).toBe('B');
   });
 
   it('게임 중 새로 들어온 플레이어도 판정에 포함된다', () => {
@@ -366,6 +381,24 @@ describe('추가 행동 (7장)', () => {
     expect(room.setAction(a.id, 'BET_WRONG', b.id, 2000).ok).toBe(true);
     expect(room.actionOf(a.id)).toEqual({ type: 'BET_WRONG', targetId: b.id });
     expect(room.setAction(a.id, 'NONE', undefined, 120_000).ok).toBe(false); // 타이머 종료 후
+  });
+
+  it('찍기는 문제 시작 후 30초까지만(초기화 포함), 이모티콘은 그 뒤에도 가능', () => {
+    const room = new GameRoom(questions);
+    const a = joinOk(room, '철수');
+    const b = joinOk(room, '영희');
+    room.start(0);
+    expect(room.setAction(a.id, 'BET_CORRECT', b.id, 29_999).ok).toBe(true);
+    const late = room.setAction(a.id, 'BET_WRONG', b.id, 30_000);
+    expect(late.ok).toBe(false);
+    if (!late.ok) expect(late.error.message).toContain('30초');
+    expect(room.setAction(a.id, 'NONE', undefined, 45_000).ok).toBe(false);
+    expect(room.actionOf(a.id)).toEqual({ type: 'BET_CORRECT', targetId: b.id }); // 30초 때 선택이 최종
+    expect(room.emote(a.id, 'LAUGH', 60_000).ok).toBe(true);
+    // 다음 문제에서는 다시 30초
+    room.reveal();
+    room.next(200_000);
+    expect(room.setAction(a.id, 'BET_WRONG', b.id, 210_000).ok).toBe(true);
   });
 
   it('초기화(NONE)를 누르면 찍기가 취소된다', () => {

@@ -35,6 +35,13 @@ export const PRACTICE_COUNT = 3;
 export const MAIN_COUNT = 20;
 
 export const DEFAULT_TIME_LIMIT_SEC = 120;
+// 7장: 찍기(맞힘·틀림·초기화)는 문제 시작 후 30초까지만. 이모티콘·이동은 계속 가능.
+export const BET_WINDOW_MS = 30_000;
+
+// 찍기 마감 시각: 시작 + 30초, 단 문제 제한 시간이 더 짧으면 그때까지
+export function betDeadline(questionStartedAt: number, deadline: number): number {
+  return Math.min(questionStartedAt + BET_WINDOW_MS, deadline);
+}
 export const SCORE_CORRECT = 10;
 export const SCORE_BET = 3;
 // 7장: 이모티콘 말풍선 표시 시간과 연타 방지 쿨다운

@@ -1,4 +1,4 @@
-import { EMOTES, MAIN_COUNT } from '../../../shared/constants.ts';
+import { EMOTES, MAIN_COUNT, betDeadline } from '../../../shared/constants.ts';
 import type {
   ActionType,
   Choice,
@@ -52,6 +52,7 @@ export function renderGame(root: HTMLElement): GameScreen {
         </div>
         <div class="action-bar" hidden>
           <div class="action-row bet-row">
+            <span class="bet-timer"></span>
             <span class="action-target"></span>
             ${ACTIONS.map((a) => `<button type="button" class="action-button bet-button" data-action="${a.type}" aria-label="${a.label}">${a.html}</button>`).join('')}
           </div>
@@ -62,6 +63,7 @@ export function renderGame(root: HTMLElement): GameScreen {
       </div>
       <div class="hud-bottom">
         <span class="my-score"></span>
+        <p class="reveal-explanation" hidden></p>
         <span class="my-choice"></span>
       </div>
       <div class="target-modal" hidden>
@@ -84,9 +86,11 @@ export function renderGame(root: HTMLElement): GameScreen {
   const number = $<HTMLElement>('.q-number');
   const image = $<HTMLImageElement>('.q-image');
   const revealNote = $<HTMLParagraphElement>('.reveal-note');
+  const explanationEl = $<HTMLParagraphElement>('.reveal-explanation');
   const actionBar = $<HTMLElement>('.action-bar');
   const actionTarget = $<HTMLElement>('.action-target');
   const betRow = $<HTMLElement>('.bet-row');
+  const betTimer = $<HTMLElement>('.bet-timer');
   const myScore = $<HTMLSpanElement>('.my-score');
   const myChoice = $<HTMLSpanElement>('.my-choice');
   const modal = $<HTMLElement>('.target-modal');
@@ -125,15 +129,27 @@ export function renderGame(root: HTMLElement): GameScreen {
   // 찍을 수 있는 대상: 나와 관리자를 뺀 접속 중인 플레이어
   const targets = (): PublicPlayer[] => snapshot?.players.filter((p) => p.id !== myId && p.connected) ?? [];
 
-  const questionOpen = (): boolean =>
-    snapshot?.phase === 'QUESTION' && snapshot.deadline !== null && serverTime() < snapshot.deadline;
+  // 찍기는 문제 시작 후 30초까지만(서버도 같은 기준으로 막는다)
+  const betEndsAt = (): number | null =>
+    snapshot?.phase === 'QUESTION' && snapshot.questionStartedAt !== null && snapshot.deadline !== null
+      ? betDeadline(snapshot.questionStartedAt, snapshot.deadline)
+      : null;
+  const betOpen = (): boolean => {
+    const end = betEndsAt();
+    return end !== null && serverTime() < end;
+  };
 
   function renderActions(): void {
     const phase = snapshot?.phase;
-    // 이모티콘은 대기실·문제·정답 공개 때, 찍기는 문제·정답 공개 때(공개 중에는 비활성) 보인다
+    // 이모티콘은 대기실·문제·정답 공개 때, 찍기는 문제·정답 공개 때(30초 뒤·공개 중에는 비활성) 보인다
     actionBar.hidden = phase === 'RESULT' || !snapshot;
     betRow.hidden = phase !== 'QUESTION' && phase !== 'REVEAL';
-    const open = phase === 'QUESTION';
+    const open = betOpen();
+    const end = betEndsAt();
+    betTimer.textContent = open && end !== null ? `찍기 ${Math.ceil((end - serverTime()) / 1000)}초` : '찍기 마감';
+    betTimer.classList.toggle('closed', !open);
+    betTimer.classList.toggle('urgent', open && end !== null && end - serverTime() <= 10_000);
+    if (!open) modal.hidden = true;
     const noTargets = targets().length === 0;
     for (const a of ACTIONS) {
       const btn = actionButtons.get(a.type)!;
@@ -147,6 +163,17 @@ export function renderGame(root: HTMLElement): GameScreen {
       : myAction.type === 'BET_WRONG' ? `❌ ${targetName}`
       : '';
   }
+
+  // 30초 카운트다운과 마감 전환을 위해 문제 진행 중에는 주기적으로 다시 그린다
+  let lastBetState = '';
+  const betTick = window.setInterval(() => {
+    if (snapshot?.phase !== 'QUESTION') return;
+    const state = `${betOpen()}:${Math.ceil(((betEndsAt() ?? 0) - serverTime()) / 1000)}`;
+    if (state !== lastBetState) {
+      lastBetState = state;
+      renderActions();
+    }
+  }, 250);
 
   function sendAction(type: ActionType, targetId?: string): void {
     socket.emit('player:action', { type, targetId }, (res) => {
@@ -174,7 +201,7 @@ export function renderGame(root: HTMLElement): GameScreen {
         btn.append(createAvatar(p.character, 40), name);
         btn.addEventListener('click', () => {
           modal.hidden = true;
-          if (questionOpen()) sendAction(type, p.id);
+          if (betOpen()) sendAction(type, p.id);
         });
         li.append(btn);
         return li;
@@ -185,7 +212,7 @@ export function renderGame(root: HTMLElement): GameScreen {
 
   for (const a of ACTIONS) {
     actionButtons.get(a.type)!.addEventListener('click', () => {
-      if (!questionOpen()) return;
+      if (!betOpen()) return;
       if (a.type === 'BET_CORRECT' || a.type === 'BET_WRONG') openTargetModal(a.type);
       else sendAction(a.type);
     });
@@ -239,12 +266,15 @@ export function renderGame(root: HTMLElement): GameScreen {
       // 정답 공개
       const round = next.lastRound;
       revealNote.hidden = !round;
+      // 해설은 정답 공개 때 모든 플레이어에게 보여 준다
+      explanationEl.hidden = !round?.explanation;
+      explanationEl.textContent = round?.explanation ? `💡 ${round.explanation}` : '';
       if (round) {
         const mine = round.perPlayer[id];
         const verdict = !mine ? '이번 문제는 참여하지 않았어요'
           : `${mine.isCorrect ? '정답!' : '오답'} ${signed(mine.total)}점`;
         revealNote.textContent = `정답은 ${round.correct} · ${verdict}`
-          + (round.stage === 'PRACTICE' ? ' · 연습 점수는 본 게임 미반영' : '');
+          + (round.stage === 'PRACTICE' ? ' (연습)' : '');
       }
 
       // 하단: 내 점수(연습 중에는 「(연습)」 표시)
@@ -277,6 +307,7 @@ export function renderGame(root: HTMLElement): GameScreen {
       field.showEmote(playerId, emote);
     },
     destroy() {
+      clearInterval(betTick);
       timer.destroy();
       field.destroy();
     },

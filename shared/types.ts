@@ -66,6 +66,7 @@ export type PublicAdmin = Pick<AdminAvatar, 'x' | 'y' | 'connected'>;
 // round:reveal 페이로드: RoundResult + 갱신된 점수
 export interface RevealPayload extends RoundResult {
   scores: Record<string, { score: number; correctCount: number }>;
+  explanation?: string; // 정답 공개 때부터 모든 플레이어에게 공개(문제 텍스트는 계속 관리자 전용)
 }
 
 export interface RankingEntry {

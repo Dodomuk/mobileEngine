@@ -4,6 +4,7 @@ import {
   ADMIN_ID,
   CHARACTERS,
   DEFAULT_TIME_LIMIT_SEC,
+  betDeadline,
   EMOTE_COOLDOWN_MS,
   EMOTES,
   FIELD_HEIGHT,
@@ -241,6 +242,9 @@ export class GameRoom {
     if (!player) return fail('INVALID_PAYLOAD', '잘못된 요청입니다.');
     const { phase, deadline } = this.state;
     if (phase !== 'QUESTION' || (deadline !== undefined && now >= deadline)) return WRONG_PHASE();
+    if (this.questionStartedAt !== null && deadline !== undefined && now >= betDeadline(this.questionStartedAt, deadline)) {
+      return fail('INVALID_PHASE', '찍기는 문제 시작 후 30초까지만 할 수 있어요.');
+    }
     if (typeof type !== 'string' || !ACTION_TYPES.has(type as ActionType)) {
       return fail('INVALID_PAYLOAD', '잘못된 행동입니다.');
     }
@@ -294,7 +298,7 @@ export class GameRoom {
       const r = result.perPlayer[p.id];
       p.score += r.total;
       if (r.isCorrect) p.correctCount++;
-      // 판정 뒤에는 움직이지 않도록 목표를 현재 위치로 고정
+      // 판정 순간 제자리에 멈춘다(정답 공개 중에는 다시 움직일 수 있음)
       p.targetX = p.x;
       p.targetY = p.y;
     }
@@ -356,7 +360,8 @@ export class GameRoom {
     for (const p of Object.values(this.state.players)) {
       scores[p.id] = { score: p.score, correctCount: p.correctCount };
     }
-    return { ...last, scores };
+    const explanation = this.state.questions.find((q) => q.id === last.questionId)?.explanation;
+    return { ...last, scores, ...(explanation ? { explanation } : {}) };
   }
 
   publicQuestion(): PublicQuestion | null {
@@ -404,10 +409,11 @@ export class GameRoom {
     this.state.deadline = now + (question.timeLimitSec ?? DEFAULT_TIME_LIMIT_SEC) * 1000;
   }
 
-  // 대기실과 문제 진행 중(타이머가 끝나기 전)에만 움직일 수 있다
+  // 대기실·문제 진행 중·정답 공개 중에 움직일 수 있다. 판정은 공개 순간 위치로 이미 끝났으므로
+  // 공개 중 이동은 결과에 영향이 없다. 최종 결과 화면에서만 막는다.
   private canMove(now: number): boolean {
     const { phase, deadline } = this.state;
-    if (phase === 'LOBBY') return true;
+    if (phase === 'LOBBY' || phase === 'REVEAL') return true;
     return phase === 'QUESTION' && (deadline === undefined || now < deadline);
   }
 

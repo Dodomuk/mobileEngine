@@ -55,7 +55,14 @@ interface RevealState {
 
 const CHOICE_FONT = '700 30px system-ui, -apple-system, sans-serif';
 const CHOICE_LINE = 36;
-const CHOICE_MAX_WIDTH = 390;
+const CHOICE_MAX_WIDTH = 360; // 카드 폭(알맹이 포함)이 원 간격 420을 넘지 않도록
+
+// A·B·C 원 색: 밝은 면 → 기본 → 가장자리 → 옆면(두께)
+const CIRCLE_PALETTE: Record<Choice, { light: string; base: string; deep: string; side: string }> = {
+  A: { light: 'rgba(255, 190, 190, 0.92)', base: 'rgba(240, 82, 82, 0.8)', deep: 'rgba(170, 30, 40, 0.88)', side: '#9b2226' },
+  B: { light: 'rgba(200, 230, 255, 0.92)', base: 'rgba(66, 140, 235, 0.8)', deep: 'rgba(20, 70, 160, 0.88)', side: '#154a8a' },
+  C: { light: 'rgba(200, 245, 200, 0.92)', base: 'rgba(55, 178, 90, 0.8)', deep: 'rgba(20, 110, 50, 0.88)', side: '#17602f' },
+};
 
 // 캐릭터 이미지: 없으면 색 원 + 이름 첫 글자로 그린다(4장 플레이스홀더)
 const images = new Map<AnyCharacter, HTMLImageElement | null>();
@@ -174,8 +181,8 @@ export class FieldView {
       if (!seen.has(id)) this.sprites.delete(id);
     }
 
-    // 5장: 판정 뒤(REVEAL·RESULT)에는 이동 입력을 보내지 않는다
-    this.inputEnabled = snapshot.phase === 'LOBBY' || snapshot.phase === 'QUESTION';
+    // 대기실·문제·정답 공개 중에 움직일 수 있다(최종 결과 화면만 막음)
+    this.inputEnabled = snapshot.phase !== 'RESULT';
     this.choices = snapshot.question?.choices ?? null;
     this.setReveal(snapshot.phase === 'REVEAL' ? snapshot.lastRound : null);
   }
@@ -321,8 +328,8 @@ export class FieldView {
 
     ctx.drawImage(this.background, 0, 0, FIELD_WIDTH, FIELD_HEIGHT);
     drawWater(ctx, now);
-    this.drawCircles(ctx, choice);
-    this.drawChoiceLabels(ctx);
+    this.drawCircles(ctx, choice, now);
+    this.drawChoiceLabels(ctx, now);
     this.drawTouchMarker(ctx, now);
     for (const d of drawn) this.drawCharacter(ctx, d.sprite, d.x, d.y, d.moving, now);
     const at = new Map(drawn.map((d) => [d.sprite.entity.id, d]));
@@ -340,72 +347,286 @@ export class FieldView {
     }
   };
 
-  private drawCircles(ctx: CanvasRenderingContext2D, myChoice: Choice | null): void {
+  // A·B·C 원: 살짝 떠 있는 유리 원반. 옆면(두께) + 그라데이션 윗면 + 광택 + 음각 글자.
+  // 정답 공개 때는 정답 원만 금빛으로 빛나고 나머지는 흐려진다.
+  private drawCircles(ctx: CanvasRenderingContext2D, myChoice: Choice | null, now: number): void {
     const correct = this.reveal?.correct;
+    const pulse = (Math.sin(now / 260) + 1) / 2;
     for (const choice of ['A', 'B', 'C'] as const) {
       const c = ANSWER_CIRCLES[choice];
-      // 정답 공개 때는 정답 원만 강조하고 나머지는 흐리게
+      const p = CIRCLE_PALETTE[choice];
       const isCorrect = choice === correct;
       const dimmed = correct !== undefined && !isCorrect;
       const active = correct === undefined && choice === myChoice;
+      const lift = isCorrect ? 18 : 12; // 원반 두께
 
       ctx.save();
-      ctx.globalAlpha = dimmed ? 0.35 : 1;
+      ctx.globalAlpha = dimmed ? 0.38 : 1;
+
+      // 바닥 그림자
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y + lift + 6, c.r * 0.98, c.r * 0.96, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+      ctx.fill();
+
+      // 옆면(두께)
+      ctx.beginPath();
+      ctx.arc(c.x, c.y + lift, c.r, 0, Math.PI * 2);
+      ctx.fillStyle = p.side;
+      ctx.fill();
+
+      // 정답 원 금빛 후광
+      if (isCorrect) {
+        ctx.save();
+        ctx.shadowColor = `rgba(255, 196, 0, ${0.65 + pulse * 0.3})`;
+        ctx.shadowBlur = 34 + pulse * 22;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, c.r + 6, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 214, 10, 0.35)';
+        ctx.fill();
+        ctx.restore();
+      } else if (active) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(255, 255, 255, 0.95)';
+        ctx.shadowBlur = 26;
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, c.r + 2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // 윗면: 왼쪽 위가 밝은 반투명 유리
+      const face = ctx.createRadialGradient(c.x - c.r * 0.35, c.y - c.r * 0.45, c.r * 0.1, c.x, c.y, c.r * 1.05);
+      face.addColorStop(0, p.light);
+      face.addColorStop(0.55, p.base);
+      face.addColorStop(1, p.deep);
       ctx.beginPath();
       ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
-      ctx.fillStyle = c.color;
+      ctx.fillStyle = face;
       ctx.fill();
-      if (active || isCorrect) {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
-        ctx.fill();
+
+      ctx.save();
+      ctx.clip();
+      // 서리 낀 유리 느낌(정답·내 원은 더 밝게)
+      if (isCorrect || active) {
+        ctx.fillStyle = isCorrect ? 'rgba(255, 244, 200, 0.12)' : 'rgba(255, 255, 255, 0.14)';
+        ctx.fillRect(c.x - c.r, c.y - c.r, c.r * 2, c.r * 2);
       }
-      ctx.lineWidth = isCorrect ? 14 : active ? 10 : 5;
-      ctx.strokeStyle = isCorrect ? '#ffd23f' : active ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.6)';
+      // 위쪽 광택
+      const gloss = ctx.createLinearGradient(0, c.y - c.r, 0, c.y);
+      gloss.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+      gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y - c.r * 0.42, c.r * 0.8, c.r * 0.5, 0, 0, Math.PI * 2);
+      ctx.fillStyle = gloss;
+      ctx.fill();
+      // 아래쪽 반사광
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y + c.r * 0.85, c.r * 0.6, c.r * 0.18, 0, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+      ctx.fill();
+      ctx.restore();
+
+      // 테두리: 바깥 흰 유리선 + 정답이면 금빛 그라데이션 링
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r - 2, 0, Math.PI * 2);
+      if (isCorrect) {
+        const ring = ctx.createLinearGradient(c.x - c.r, c.y - c.r, c.x + c.r, c.y + c.r);
+        ring.addColorStop(0, '#fff9db');
+        ring.addColorStop(0.35, '#ffd43b');
+        ring.addColorStop(0.7, '#f59f00');
+        ring.addColorStop(1, '#fff3bf');
+        ctx.lineWidth = 10;
+        ctx.strokeStyle = ring;
+      } else {
+        ctx.lineWidth = active ? 7 : 4;
+        ctx.strokeStyle = active ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.6)';
+      }
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.r - (isCorrect ? 8 : 5), 0, Math.PI * 2);
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.35)';
       ctx.stroke();
 
-      ctx.font = '900 140px system-ui, sans-serif';
+      // 글자: 그림자 + 흰→연한 그라데이션으로 도드라지게
+      ctx.font = '900 140px system-ui, -apple-system, sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = active || isCorrect ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.7)';
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.35)';
+      ctx.shadowOffsetY = 6;
+      ctx.shadowBlur = 10;
+      const letter = ctx.createLinearGradient(0, c.y - 60, 0, c.y + 70);
+      letter.addColorStop(0, 'rgba(255, 255, 255, 0.98)');
+      letter.addColorStop(1, isCorrect ? 'rgba(255, 236, 153, 0.95)' : 'rgba(255, 255, 255, 0.72)');
+      ctx.fillStyle = letter;
       ctx.fillText(choice, c.x, c.y + 8);
+      ctx.restore();
 
-      if (isCorrect) {
-        ctx.font = '900 34px system-ui, sans-serif';
-        ctx.fillStyle = '#ffd23f';
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.45)';
-        ctx.lineWidth = 6;
-        ctx.strokeText('정답', c.x, c.y + c.r - 34);
-        ctx.fillText('정답', c.x, c.y + c.r - 34);
-      }
+      if (isCorrect) this.drawGlassPill(ctx, c.x, c.y + c.r - 40, '정답', 'gold', 30);
       ctx.restore();
     }
   }
 
-  // 선택지 글자를 각 원 바로 위에 보여 준다(문제 텍스트는 없음)
-  private drawChoiceLabels(ctx: CanvasRenderingContext2D): void {
+  // 유리 알약: 반투명 그라데이션 + 윗면 광택 + 흰 테두리 + 그림자
+  private drawGlassPill(
+    ctx: CanvasRenderingContext2D, cx: number, cy: number, text: string,
+    tone: 'gold' | 'red' | 'grey' | 'blue', size: number, scale = 1,
+  ): void {
+    const tones = {
+      gold: { top: 'rgba(255, 243, 191, 0.96)', bottom: 'rgba(250, 176, 5, 0.92)', ink: '#5c3c00', glow: 'rgba(255, 196, 0, 0.7)' },
+      red: { top: 'rgba(255, 201, 201, 0.96)', bottom: 'rgba(224, 49, 49, 0.92)', ink: '#ffffff', glow: 'rgba(224, 49, 49, 0.55)' },
+      grey: { top: 'rgba(248, 249, 250, 0.95)', bottom: 'rgba(173, 181, 189, 0.9)', ink: '#343a40', glow: 'rgba(0, 0, 0, 0.2)' },
+      blue: { top: 'rgba(208, 235, 255, 0.96)', bottom: 'rgba(28, 126, 214, 0.92)', ink: '#ffffff', glow: 'rgba(28, 126, 214, 0.55)' },
+    }[tone];
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(scale, scale);
+    ctx.font = `900 ${size}px system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const w = ctx.measureText(text).width + size * 1.1;
+    const h = size * 1.45;
+    const r = h / 2;
+
+    ctx.save();
+    ctx.shadowColor = tone === 'grey' ? 'rgba(0, 0, 0, 0.25)' : tones.glow;
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetY = 5;
+    ctx.beginPath();
+    ctx.roundRect(-w / 2, -h / 2, w, h, r);
+    const fill = ctx.createLinearGradient(0, -h / 2, 0, h / 2);
+    fill.addColorStop(0, tones.top);
+    fill.addColorStop(1, tones.bottom);
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.restore();
+
+    // 윗면 광택
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(-w / 2, -h / 2, w, h, r);
+    ctx.clip();
+    const gloss = ctx.createLinearGradient(0, -h / 2, 0, 0);
+    gloss.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+    gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.beginPath();
+    ctx.roundRect(-w / 2 + 3, -h / 2 + 2, w - 6, h * 0.48, [r, r, r * 0.4, r * 0.4]);
+    ctx.fillStyle = gloss;
+    ctx.fill();
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.roundRect(-w / 2, -h / 2, w, h, r);
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+    ctx.stroke();
+
+    if (tones.ink === '#ffffff') {
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+      ctx.strokeText(text, 0, 2);
+    }
+    ctx.fillStyle = tones.ink;
+    ctx.fillText(text, 0, 2);
+    ctx.restore();
+  }
+
+  // 선택지 글자: 각 원 위의 유리 카드(왼쪽에 A·B·C 표시). 정답이면 금빛으로 빛난다.
+  private drawChoiceLabels(ctx: CanvasRenderingContext2D, now: number): void {
     if (!this.choices) return;
     const correct = this.reveal?.correct;
+    const pulse = (Math.sin(now / 260) + 1) / 2;
     ctx.save();
     ctx.font = CHOICE_FONT;
-    ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (const choice of ['A', 'B', 'C'] as const) {
       const c = ANSWER_CIRCLES[choice];
-      const lines = wrapText(ctx, this.choices[choice], CHOICE_MAX_WIDTH, 3);
-      const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + 36;
-      const h = lines.length * CHOICE_LINE + 18;
+      const p = CIRCLE_PALETTE[choice];
+      ctx.font = CHOICE_FONT;
+      const lines = wrapText(ctx, this.choices[choice], CHOICE_MAX_WIDTH - 44, 3);
+      const chip = 34;
+      const textW = Math.max(...lines.map((l) => ctx.measureText(l).width));
+      const w = textW + chip + 46;
+      const h = Math.max(lines.length * CHOICE_LINE + 20, chip + 18);
       const bottom = c.y - c.r + 8; // 원 윗부분에 살짝 걸치게 해 상단 아이콘과 겹치지 않도록
+      const left = c.x - w / 2;
+      const top = bottom - h;
       const isCorrect = choice === correct;
       ctx.globalAlpha = correct !== undefined && !isCorrect ? 0.45 : 1;
+
+      // 카드: 그림자(정답이면 금빛 후광) + 반투명 그라데이션
+      ctx.save();
+      ctx.shadowColor = isCorrect ? `rgba(255, 196, 0, ${0.6 + pulse * 0.35})` : 'rgba(0, 0, 0, 0.28)';
+      ctx.shadowBlur = isCorrect ? 26 + pulse * 16 : 16;
+      ctx.shadowOffsetY = isCorrect ? 0 : 6;
       ctx.beginPath();
-      ctx.roundRect(c.x - w / 2, bottom - h, w, h, 16);
-      ctx.fillStyle = isCorrect ? '#ffe066' : 'rgba(255, 255, 255, 0.94)';
+      ctx.roundRect(left, top, w, h, 18);
+      const fill = ctx.createLinearGradient(0, top, 0, bottom);
+      if (isCorrect) {
+        fill.addColorStop(0, 'rgba(255, 249, 219, 0.97)');
+        fill.addColorStop(1, 'rgba(255, 212, 59, 0.9)');
+      } else {
+        fill.addColorStop(0, 'rgba(255, 255, 255, 0.93)');
+        fill.addColorStop(1, 'rgba(255, 255, 255, 0.72)');
+      }
+      ctx.fillStyle = fill;
       ctx.fill();
-      ctx.lineWidth = isCorrect ? 5 : 3;
-      ctx.strokeStyle = isCorrect ? '#f08c00' : c.color.replace(/[\d.]+\)$/, '0.9)');
+      ctx.restore();
+
+      // 윗면 광택
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(left, top, w, h, 18);
+      ctx.clip();
+      const gloss = ctx.createLinearGradient(0, top, 0, top + h * 0.5);
+      gloss.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+      gloss.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      ctx.fillStyle = gloss;
+      ctx.fillRect(left, top, w, h * 0.5);
+      ctx.restore();
+
+      // 테두리: 흰 유리선 + 정답이면 금빛 그라데이션
+      ctx.beginPath();
+      ctx.roundRect(left, top, w, h, 18);
+      if (isCorrect) {
+        const ring = ctx.createLinearGradient(left, top, left + w, bottom);
+        ring.addColorStop(0, '#fff3bf');
+        ring.addColorStop(0.5, '#f59f00');
+        ring.addColorStop(1, '#ffe066');
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = ring;
+      } else {
+        ctx.lineWidth = 2.5;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      }
       ctx.stroke();
-      ctx.fillStyle = '#1f2a24';
-      lines.forEach((line, i) => ctx.fillText(line, c.x, bottom - h + 9 + CHOICE_LINE * (i + 0.5) + 1));
+
+      // 왼쪽 A·B·C 알맹이
+      const chipX = left + 14 + chip / 2;
+      const chipY = top + h / 2;
+      const chipFill = ctx.createRadialGradient(chipX - 6, chipY - 8, 2, chipX, chipY, chip / 2);
+      chipFill.addColorStop(0, p.light);
+      chipFill.addColorStop(1, p.deep);
+      ctx.beginPath();
+      ctx.arc(chipX, chipY, chip / 2, 0, Math.PI * 2);
+      ctx.fillStyle = chipFill;
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.stroke();
+      ctx.font = '900 20px system-ui, -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(choice, chipX, chipY + 1);
+
+      ctx.font = CHOICE_FONT;
+      ctx.textAlign = 'left';
+      ctx.fillStyle = isCorrect ? '#5c3c00' : '#1f2a24';
+      const textX = left + chip + 30;
+      lines.forEach((line, i) => ctx.fillText(line, textX, top + (h - lines.length * CHOICE_LINE) / 2 + CHOICE_LINE * (i + 0.5) + 1));
     }
     ctx.restore();
   }
@@ -644,14 +865,24 @@ export class FieldView {
     ctx.globalAlpha = Math.max(0, fade);
     ctx.translate(cx, cy);
     ctx.scale(pop, pop);
+    // 말풍선과 꼬리를 하나의 외곽선으로 그려 이음매 선이 생기지 않게 한다
+    const rx = 40;
+    const ry = 34;
+    const a1 = Math.PI * 0.62; // 꼬리 오른쪽 뿌리
+    const a2 = Math.PI * 0.76; // 꼬리 왼쪽 뿌리
     ctx.beginPath();
-    ctx.ellipse(0, 0, 40, 34, 0, 0, Math.PI * 2);
-    ctx.moveTo(-18, 26);
-    ctx.lineTo(-32, 44);
-    ctx.lineTo(-4, 32);
+    ctx.ellipse(0, 0, rx, ry, 0, a2, a1 + Math.PI * 2);
+    ctx.lineTo(-30, 46); // 꼬리 끝
+    ctx.closePath();
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetY = 4;
     ctx.fillStyle = '#fff';
     ctx.fill();
+    ctx.restore();
     ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
     ctx.strokeStyle = 'rgba(40, 30, 20, 0.8)';
     ctx.stroke();
     const wobble = Math.sin(age / 90) * 0.08;
@@ -663,25 +894,19 @@ export class FieldView {
     ctx.restore();
   }
 
-  // 3장: 정답 공개 때 캐릭터 머리 위에 점수 변동(+10, -2 등) 팝업
+  // 3장: 정답 공개 때 캐릭터 머리 위에 점수 변동(+10, -3 등). 통통 튀어나오는 유리 알약.
   private drawPopup(ctx: CanvasRenderingContext2D, id: string, x: number, y: number, now: number): void {
     const delta = this.reveal?.deltas.get(id);
     if (delta === undefined) return;
     const t = Math.min(1, (now - this.reveal!.shownAt) / POPUP_RISE_MS);
-    const ease = 1 - (1 - t) ** 3;
+    // easeOutBack: 살짝 커졌다 제자리
+    const c1 = 1.70158;
+    const pop = 1 + (c1 + 1) * (t - 1) ** 3 + c1 * (t - 1) ** 2;
     const text = delta > 0 ? `+${delta}` : String(delta);
-    const py = y - CHARACTER_SIZE / 2 - 20 - ease * 30;
-
+    const py = y - CHARACTER_SIZE / 2 - 34 - Math.min(1, t * 1.4) * 22;
     ctx.save();
-    ctx.globalAlpha = t;
-    ctx.font = '900 40px system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.lineWidth = 8;
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-    ctx.strokeText(text, x, py);
-    ctx.fillStyle = delta > 0 ? '#ffe14d' : delta < 0 ? '#ff7a7a' : '#ffffff';
-    ctx.fillText(text, x, py);
+    ctx.globalAlpha = Math.min(1, t * 2);
+    this.drawGlassPill(ctx, x, py, text, delta > 0 ? 'gold' : delta < 0 ? 'red' : 'grey', 30, Math.max(0.01, pop));
     ctx.restore();
   }
 }
